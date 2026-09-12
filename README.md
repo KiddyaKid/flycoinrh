@@ -1,4 +1,16 @@
-# flycoinrh
+# FLYFAMILY
+
+[Live observatory](https://flyfamily.live/) · [Family runtime and setup](family/README.md) · [Upstream project](https://github.com/fruitflydev/flycoinrh)
+
+This fork adds two seeded MaleCNS model trials, a shared PONS browser capture, confirmed trade triggers, neural-output naming, a repeatable deployment queue and a family ledger. The dedicated entry point is `family/server.mjs`. It prepares transactions by default; signing is a separate operator configuration with a cumulative spending cap.
+
+Habitat courtship is illustrative. Actual eggs come from recorded triggers, and child-token records require verified deployment receipts. Names are decoded from measured outputs using a fixed vocabulary; this does not establish language, calibrated mating or inherited learned memory. A confirmed child token does not automatically start another brain worker.
+
+Original MIT license and NOTICE are retained. MaleCNS data retains its separate CC-BY attribution. The documentation below describes the **upstream implementation and its historical experiments**; use [family/README.md](family/README.md) for the FLYFAMILY extension and its current limits. The original X posting and wallet-browser entry points are not started by the family runtime.
+
+---
+
+# Upstream: flycoinrh
 
 A real fruit fly brain, simulated neuron by neuron, driving the
 [pons launchpad](https://www.ponsfamily.com/launchpad) on Robinhood Chain.
