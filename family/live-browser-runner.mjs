@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 const dir=process.env.FAMILY_PILOT_DIR,children=[];
 if(!dir||process.env.FAMILY_LIVE_TEST!=='1')throw Error('LIVE_RUN_NOT_CONFIGURED');
-const child=file=>{const p=spawn(process.execPath,[resolve(import.meta.dirname,file)],{cwd:resolve(import.meta.dirname,'..'),windowsHide:true,stdio:'ignore'});children.push(p);return p;};
+const child=file=>{const p=spawn(process.execPath,[resolve(import.meta.dirname,file)],{cwd:resolve(import.meta.dirname,'..'),windowsHide:true,stdio:['ignore','ignore','pipe']});p.stderr.on('data',()=>{});p.on('exit',(code,signal)=>{writeFileSync(resolve(dir,file+'.exit.json'),JSON.stringify({code,signal,asOf:new Date().toISOString()}));});children.push(p);return p;};
 let finished=false;
 try{
  const browser=child('browser-pilot.mjs'),signer=child('auto-sign.mjs');

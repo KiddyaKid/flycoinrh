@@ -1,6 +1,8 @@
 // One process owns the browser, confirmed-chain cursor and durable birth queue.
 // Public HTTP is read-only. Signing is opt-in, never reachable from browser input.
 import {createServer} from 'node:http';
+import {browserRoam,EXPLORE_URL} from './lib/browser-roam.mjs';
+import {collectLiveSwaps} from './lib/live-swaps.mjs';
 import {runLane} from './lib/live-loop.mjs';
 import {videoServer,captureBrowser} from './lib/live-camera.mjs';
 import {bindLiveAllowance} from './lib/live-authorization.mjs';
@@ -19,6 +21,7 @@ const root=resolve(import.meta.dirname,'..'),folder=resolve(process.env.FAMILY_S
 mkdirSync(folder,{recursive:true});
 const lockPath=resolve(folder,'process.lock'),lock=openSync(lockPath,'wx');writeFileSync(lock,String(process.pid));
 const chain=JSON.parse(readFileSync(resolve(import.meta.dirname,'chain.json'),'utf8'));
+const inputPools=JSON.parse(readFileSync(resolve(import.meta.dirname,'live-input-pools.json'),'utf8'));
 const owner=getAddress(process.env.FAMILY_OPERATOR_ADDRESS??'0x9ca6276184a59d23ef97e1cd06c02c4a6af3322c');
 const rpc=provider(process.env.FAMILY_RPC??chain.rpcUrl),abi=new Interface(CURVE_ABI);
 const db=new DatabaseSync(resolve(folder,'ledger.sqlite'));
@@ -29,7 +32,7 @@ const births=()=>db.prepare('SELECT payload FROM births ORDER BY rowid').all().m
 const save=b=>db.prepare('INSERT INTO births VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(b.id,JSON.stringify(b));
 if(!get('runId'))put('runId',crypto.randomUUID());
 let running=true,browser,page,jpg=null,frameAt=null,neural=null,cameraError=null,observerError=null,revision=get('revision')??0;
-let worker=null,answer=null,stopCapture,scan=null,unconfirmed=[],processing=null,brainBusy=false,loopTimes={};
+let worker=null,answer=null,stopCapture,scan=null,unconfirmed=[],processing=null,brainBusy=false,loopTimes={},idleControl=null;
 const stamp=()=>new Date().toISOString();
 function videoUrl(){try{const u=new URL(readFileSync(resolve(folder,'video-origin.txt'),'utf8').trim());return u.protocol==='https:'&&u.hostname.endsWith('.trycloudflare.com')?new URL('/video.mjpeg',u).href:null;}catch{return null;}}
 db.exec('CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, hash TEXT)');
@@ -44,7 +47,7 @@ function startBrain(){
  worker.on('exit',()=>{worker=null;if(answer){answer.reject(Error('BRAIN_WORKER_STOPPED'));answer=null;}});
 }
 async function think(kind){if(!worker||!jpg)throw Error('BRAIN_OR_FRAME_UNAVAILABLE');const path=resolve(folder,'brain-frame.jpg');writeFileSync(path,jpg);const id=crypto.randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{answer=null;worker?.kill();reject(Error('BRAIN_TIMEOUT'));},120000);answer={resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}};worker.stdin.write(JSON.stringify({id,frame:path,kind})+'\n');});}
-function snapshot(){const all=births(),pilot=readPilotView(root);if(pilot&&!all.some(b=>b.id===pilot.birth.id))all.push(pilot.birth);const stored=db.prepare('SELECT payload FROM trades ORDER BY rowid DESC LIMIT 30').all().map(r=>JSON.parse(r.payload)),records=[...new Map([...(pilot?[pilot.record]:[]),...stored].map(r=>[r.id,r])).values()].sort((a,b)=>b.timestamp-a.timestamp).slice(0,30);return {schema:'flyfamily.live.v1',ruleVersion:VERSION,runId:get('runId'),revision,asOf:new Date().toISOString(),status:observerError?'unavailable':'watching',observerError,camera:pilot?.camera??{status:frameAt&&Date.now()-Date.parse(frameAt)<15000?'live':'offline',asOf:frameAt,url:page?.url()??null,error:cameraError},frame:pilot?.frame??(jpg?'data:image/jpeg;base64,'+jpg.toString('base64'):null),browserControl:pilot?.browserControl??null,neural,births:all.slice(-100).map(publicBirth),offspringCount:all.filter(b=>b.status==='confirmed'&&b.receiptVerified===true).length,queueDepth:db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n,records:records.map(t=>({...t,processing:db.prepare('SELECT status FROM triggers WHERE id=?').get(t.id)?.status??'historical'})),recordCount:db.prepare('SELECT count(*) n FROM trades').get().n,journal:db.prepare('SELECT * FROM journal ORDER BY id DESC LIMIT 60').all(),scan,unconfirmed,processing,loopTimes,videoUrl:videoUrl(),execution:{mode:'bounded-live-test',reason:'One additional live child; cumulative budget 0.02 ETH'},cursor:get('cursor'),social:X_URL,logo:LOGO_URL};}
+function snapshot(){const all=births(),pilot=readPilotView(root);if(pilot&&!all.some(b=>b.id===pilot.birth.id))all.push(pilot.birth);const stored=db.prepare('SELECT payload FROM trades ORDER BY rowid DESC LIMIT 30').all().map(r=>JSON.parse(r.payload)),records=[...new Map([...(pilot?[pilot.record]:[]),...stored].map(r=>[r.id,r])).values()].sort((a,b)=>b.timestamp-a.timestamp).slice(0,30);return {schema:'flyfamily.live.v1',ruleVersion:VERSION,runId:get('runId'),revision,asOf:new Date().toISOString(),status:observerError?'unavailable':'watching',observerError,camera:pilot?.camera??{status:frameAt&&Date.now()-Date.parse(frameAt)<15000?'live':'offline',asOf:frameAt,url:page?.url()??null,error:cameraError},frame:pilot?.frame??(jpg?'data:image/jpeg;base64,'+jpg.toString('base64'):null),browserControl:pilot?.browserControl??idleControl,neural,births:all.slice(-100).map(publicBirth),offspringCount:all.filter(b=>b.status==='confirmed'&&b.receiptVerified===true).length,queueDepth:db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n,records:records.map(t=>({...t,processing:db.prepare('SELECT status FROM triggers WHERE id=?').get(t.id)?.status??'historical'})),recordCount:db.prepare('SELECT count(*) n FROM trades').get().n,journal:db.prepare('SELECT * FROM journal ORDER BY id DESC LIMIT 60').all(),scan,unconfirmed,processing,loopTimes,videoUrl:videoUrl(),execution:{mode:'bounded-live-test',reason:'One additional live child; cumulative budget 0.02 ETH'},cursor:get('cursor'),social:X_URL,logo:LOGO_URL};}
 let publisher=null;try{publisher=JSON.parse(readFileSync(process.env.FAMILY_PUBLISH_FILE,'utf8'));}catch{}
 async function publish(){revision++;put('revision',revision);const s=snapshot();writeFileSync(resolve(folder,'snapshot.tmp'),JSON.stringify(s));renameSync(resolve(folder,'snapshot.tmp'),resolve(folder,'snapshot.json'));if(publisher){const u=new URL('/api/family',publisher.endpoint);const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-Fruit-Ingest-Key':publisher.ingestKey},body:JSON.stringify(s),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('PUBLICATION_FAILED_'+r.status);}}
 function enqueue(e){const count=db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n;db.prepare('INSERT OR IGNORE INTO triggers VALUES(?,?,?)').run(e.id,JSON.stringify(e),count<MAX_PENDING?'queued':'capacity');}
@@ -75,6 +78,15 @@ async function collect(){
  db.exec('BEGIN IMMEDIATE');try{for(const t of rows){const inserted=db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?)').run(t.id,JSON.stringify(t));if(inserted.changes){enqueue(t);journal('trade-confirmed',t.kind.toUpperCase()+' · block '+t.block,t.hash);}}put('cursor',{number:to,hash:end.hash});const recent=db.prepare('SELECT payload FROM trades ORDER BY rowid DESC LIMIT 3000').all().map(r=>JSON.parse(r.payload));const surge=volumeSurge(recent,head.timestamp*1000);if(surge)enqueue(surge);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
  scan={...scan,completedAt:stamp(),head:top.number,safeHead:head.number,scannedThrough:to,lagBlocks:head.number-to,durationMs:Date.now()-started};
 }
+async function collectExternal(){
+ scan=await collectLiveSwaps({rpc,config:inputPools,getCursor:()=>get('externalCursor:'+inputPools.token),commit:(rows,cursor)=>{
+  db.exec('BEGIN IMMEDIATE');try{
+   for(const t of rows){const result=db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?)').run(t.id,JSON.stringify(t));
+    if(result.changes&&!t.historical){enqueue(t);journal('trade-confirmed',t.kind.toUpperCase()+' / '+t.quoteSymbol+' · block '+t.block,t.hash);}}
+   put('externalCursor:'+inputPools.token,cursor);db.exec('COMMIT');
+  }catch(e){db.exec('ROLLBACK');throw e;}
+ }});unconfirmed=[];
+}
 async function accountedSpend(){
  let prior={};try{prior=JSON.parse(readFileSync(process.env.FAMILY_PRIOR_TX_FILE,'utf8'));}catch{throw Error('PRIOR_SPEND_RECONCILIATION_REQUIRED');}
  const hashes=[chain.launchHash,prior.sweepHash,prior.claimHash,...births().map(b=>b.hash)].filter(Boolean),nonces=new Set();let spent=0n;
@@ -85,12 +97,13 @@ async function processEgg(){
  const all=births();let b=all.find(b=>['eligible','awaiting-signature','submitted'].includes(b.status));
  if(!b&&canStartEgg(all,Date.now())){const row=db.prepare("SELECT * FROM triggers WHERE status='queued' ORDER BY rowid LIMIT 1").get();if(!row)return;let e=JSON.parse(row.payload);if(e.kind==='surge'){const source=db.prepare('SELECT payload FROM trades WHERE id=?').get(e.tradeIds?.at(-1));if(!source)throw Error('SURGE_SOURCE_MISSING');const t=JSON.parse(source.payload);e={...e,hash:t.hash,block:t.block,blockHash:t.blockHash,sourceTrade:t};}if(Date.now()-e.timestamp>900000){db.prepare("UPDATE triggers SET status='expired' WHERE id=?").run(row.id);return;}
   if(e.hash&&(await rpc.getBlock(e.block))?.hash!==e.blockHash)throw Error('TRIGGER_REORGANIZED');
-  job('assay','Measuring '+e.kind+' input in both founders',e.hash);const readout=await think(e.kind);neural={...readout,asOf:new Date().toISOString()};b=nextEgg({event:e,readout,ordinal:all.length+1});b.event=e;b.sourceToken=chain.token;db.exec('BEGIN IMMEDIATE');try{save(b);db.prepare("UPDATE triggers SET status='consumed' WHERE id=?").run(row.id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+  job('assay','Measuring '+e.kind+' input in both founders',e.hash);const readout=await think(e.kind);neural={...readout,asOf:new Date().toISOString()};b=nextEgg({event:e,readout,ordinal:all.length+1});b.event=e;b.sourceToken=e.sourceToken??e.sourceTrade?.sourceToken??chain.token;db.exec('BEGIN IMMEDIATE');try{save(b);db.prepare("UPDATE triggers SET status='consumed' WHERE id=?").run(row.id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
  }
  if(!b)return;
+ if(b.browserAttemptedAt&&b.status!=='submitted'){processing={stage:b.preparationError?'paused':'browser',detail:b.preparationError??b.name,hash:b.tradeHash,asOf:stamp()};return;}
  processing={stage:b.status,detail:b.name,hash:b.tradeHash,asOf:stamp()};
  try{
-  if(b.status==='submitted'){const verified=await verifyOffspring({birth:b,chain,rpc,owner});if(verified){journal(verified.status,b.name,b.hash);b={...b,...verified};delete b.preparationError;save(b);if(b.token)await page?.goto(`https://www.ponsfamily.com/launchpad/${b.token}`,{waitUntil:'domcontentloaded'});}return;}
+  if(b.status==='submitted'){const verified=await verifyOffspring({birth:b,chain,rpc,owner});if(verified){journal(verified.status,b.name,b.hash);b={...b,...verified};delete b.preparationError;save(b);}return;}
 
   const spent=await accountedSpend(),prepared=await prepareOffspring({birth:b,chain,owner,rpc,spentWei:spent});if(b.status!=='awaiting-signature')journal('awaiting-signature',b.name,b.tradeHash);b={...b,status:'awaiting-signature',prepared};delete b.preparationError;save(b);
   if(!b.browserAttemptedAt){
@@ -111,16 +124,16 @@ const server=createServer((req,res)=>{res.setHeader('Cache-Control','no-store');
 try{
  browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1280,height:720}});
  await page.route('**/*',route=>{const req=route.request();if(req.isNavigationRequest()&&req.frame()===page.mainFrame()&&!['www.ponsfamily.com','ponsfamily.com'].includes(new URL(req.url()).hostname))return route.abort();return route.continue();});
- await page.goto(`https://www.ponsfamily.com/launchpad/${chain.token}`,{waitUntil:'domcontentloaded'});
+ await page.goto(EXPLORE_URL,{waitUntil:'domcontentloaded'});
  stopCapture=await captureBrowser(page,frame=>{jpg=frame;frameAt=stamp();cameraError=null;});
- let lastShown=births().filter(b=>b.status==='confirmed').at(-1)?.id;
+ const roam=browserRoam({page,onState:s=>{idleControl=s;}});
  const video=videoServer(()=>{const pilot=readPilotView(root);return pilot?.frame?Buffer.from(pilot.frame.split(',')[1],'base64'):jpg;});
  const lane=(name,interval,task,onError)=>runLane({interval,active:()=>running,task:async()=>{const t=Date.now();await task();loopTimes[name]={durationMs:Date.now()-t,asOf:stamp()};},onError});
  try{await Promise.all([
   lane('control',300,async()=>{try{if(readFileSync(resolve(folder,'stop.request'),'utf8').trim()===String(process.pid)){running=false;unlinkSync(resolve(folder,'stop.request'));}}catch{}}),
-  lane('browser',1000,async()=>{const latest=births().filter(b=>b.status==='confirmed'&&b.receiptVerified).at(-1);if(latest&&latest.id!==lastShown){lastShown=latest.id;await page.goto('https://www.ponsfamily.com/launchpad/'+latest.token,{waitUntil:'domcontentloaded'});}},()=>{cameraError='Browser navigation unavailable';}),
+  lane('browser',100,async()=>{if(!readPilotView(root))await roam();},()=>{cameraError='Browser navigation unavailable';}),
   lane('camera',1000,async()=>{if(!frameAt||Date.now()-Date.parse(frameAt)>900){jpg=await page.screenshot({type:'jpeg',quality:55});frameAt=stamp();}},()=>{cameraError='Camera unavailable';}),
-  lane('chain',3000,async()=>{await collect();observerError=null;},e=>{observerError=/^[A-Z_]+$/.test(e.message)?e.message:'CHAIN_UNAVAILABLE';}),
+  lane('chain',1000,async()=>{await collectExternal();observerError=null;},e=>{observerError=/^[A-Z_]+$/.test(e.message)?e.message:'CHAIN_UNAVAILABLE';}),
   lane('brain',10000,async()=>{if(!worker)startBrain();if(!worker||brainBusy||!jpg)return;brainBusy=true;try{const hasJob=db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n||births().some(b=>['eligible','awaiting-signature','submitted'].includes(b.status));if(hasJob&&!observerError)await processEgg();else processing=null;if(!neural?.asOf||Date.now()-Date.parse(neural.asOf)>9000)neural={...await think(null),asOf:stamp()};}finally{brainBusy=false;}},e=>{processing={stage:'paused',detail:/^[A-Z_]+$/.test(e.message)?e.message:'MODEL_CHECK_REQUIRED',asOf:stamp()};}),
   lane('publish',1000,publish,()=>{console.error('Publication unavailable');})
  ]);}finally{video.close();}

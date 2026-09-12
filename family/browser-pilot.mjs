@@ -11,7 +11,7 @@ const birth=JSON.parse(readFileSync(resolve(dir,'pilot.json'))),chain=JSON.parse
 if(birth.status!=='awaiting-signature'||birth.hash)throw Error('PILOT_NOT_READY');
 mkdirSync(dir,{recursive:true});let browser,brain,answer,stopCapture,lastJpg=null,streaming=false,requested=false,x=640,y=500;
 const state={status:'opening',asOf:new Date().toISOString(),url:'',log:[],cursor:null,transactionRequested:false,hitCount:0};
-function save(){state.asOf=new Date().toISOString();writeFileSync(resolve(dir,'browser-state.tmp'),JSON.stringify(state));renameSync(resolve(dir,'browser-state.tmp'),resolve(dir,'browser-state.json'));}
+function save(){state.asOf=new Date().toISOString();writeFileSync(resolve(dir,'browser-state.tmp'),JSON.stringify(state));try{renameSync(resolve(dir,'browser-state.tmp'),resolve(dir,'browser-state.json'));}catch(e){if(!['EPERM','EACCES','ENOENT'].includes(e.code))throw e;}}
 function note(message){state.log.push({time:new Date().toISOString(),message});state.log=state.log.slice(-30);save();console.log(message);}
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 try{
@@ -39,7 +39,7 @@ try{
   const announce=()=>window.dispatchEvent(new CustomEvent('eip6963:announceProvider',{detail:{info:{uuid:'c9f991aa-489b-4f80-b9ee-1949d88061dd',name:'FLYFAMILY Test',rdns:'live.flyfamily',icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'},provider:p}}));window.addEventListener('eip6963:requestProvider',announce);announce();
  },{owner});
  await page.goto('https://www.ponsfamily.com/launchpad/create',{waitUntil:'domcontentloaded'});state.url=page.url();
- stopCapture=await captureBrowser(page,jpg=>{lastJpg=jpg;writeFileSync(resolve(dir,'browser-frame.tmp'),jpg);renameSync(resolve(dir,'browser-frame.tmp'),resolve(dir,'browser-frame.jpg'));});
+ stopCapture=await captureBrowser(page,jpg=>{lastJpg=jpg;try{writeFileSync(resolve(dir,'browser-frame.tmp'),jpg);renameSync(resolve(dir,'browser-frame.tmp'),resolve(dir,'browser-frame.jpg'));}catch(e){if(!['EPERM','EACCES','ENOENT'].includes(e.code))throw e;}});
  streaming=true;const stream=(async()=>{while(streaming){try{const jpg=lastJpg??await page.screenshot({type:'jpeg',quality:55});writeFileSync(resolve(dir,'browser-frame.tmp'),jpg);renameSync(resolve(dir,'browser-frame.tmp'),resolve(dir,'browser-frame.jpg'));save();}catch{}await wait(500);}})();
  await page.getByRole('textbox',{name:'Name',exact:true}).waitFor({timeout:30000});
  note('Real PONS form open. Wallet exposes only the test address and read-only RPC.');
@@ -71,8 +71,9 @@ try{
   const frame=resolve(dir,'cursor-input.jpg');if(lastJpg)writeFileSync(frame,lastJpg);else await page.screenshot({path:frame,type:'jpeg',quality:65});const stepStarted=Date.now();
   const r=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('CURSOR_TIMEOUT')),90000);answer={resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}};brain.stdin.write(JSON.stringify({id:String(i),frame,x,y,seed:17+i,gain:1})+'\n');});
   const b=await launch.boundingBox();if(!b||!await launch.isEnabled())throw Error('LAUNCH_CONTROL_CHANGED');
-  const from={x,y};x=Math.max(b.x+4,Math.min(b.x+b.width-4,x+r.dx));y=Math.max(b.y+4,Math.min(b.y+b.height-4,y+r.dy));await moveDecodedCursor(page,from,{x,y});
-  const hit=Boolean(r.click);
+  const from={x,y};const inset=Math.min(b.height/2,b.width/4);x=Math.max(b.x+inset,Math.min(b.x+b.width-inset,x+r.dx));y=Math.max(b.y+8,Math.min(b.y+b.height-8,y+r.dy));await moveDecodedCursor(page,from,{x,y},600);
+  const onTarget=await launch.evaluate((button,p)=>{const e=document.elementFromPoint(p.x,p.y);return e===button||button.contains(e);},{x,y});
+  const hit=Boolean(r.click&&onTarget);
   state.cursor={...r,x,y,hit,computeMs:Date.now()-stepStarted,step:i,assistance:'DOM target selection and boundary clamp; neural displacement and stop gate'};save();writeFileSync(resolve(dir,'cursor-steps.jsonl'),JSON.stringify(state.cursor)+'\n',{flag:'a'});
   if(hit){
    state.hitCount++;note('Neural cursor hit the enabled '+(state.confirming?'confirmation':'launch')+' button; sending a real mouse click.');await page.mouse.click(x,y);await wait(3000);
