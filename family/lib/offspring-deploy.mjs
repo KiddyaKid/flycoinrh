@@ -1,6 +1,7 @@
-import {Contract,Interface,ZeroAddress,keccak256,getAddress,parseEther} from 'ethers';
+import {Contract,Interface,ZeroAddress,keccak256,getAddress} from 'ethers';
 import {FACTORY_ABI} from './pons.mjs';
-import {TOTAL_BUDGET_ETH,CHILD_CREATOR_TAX_BPS} from './operator-policy.mjs';
+import {CHILD_CREATOR_TAX_BPS} from './operator-policy.mjs';
+import {enforceLaunchBudget} from './launch-session.mjs';
 export async function prepareOffspring({birth,chain,owner,rpc,spentWei}){
  if(!['eligible','awaiting-signature'].includes(birth.status)||!/^[a-f0-9]{64}$/.test(birth.id))throw Error('BIRTH_NOT_READY');
  if(Number((await rpc.getNetwork()).chainId)!==chain.chainId||keccak256(await rpc.getCode(chain.factory))!==chain.factoryCodeHash)throw Error('FACTORY_OR_CHAIN_CHANGED');
@@ -11,7 +12,8 @@ export async function prepareOffspring({birth,chain,owner,rpc,spentWei}){
  const params={name,symbol,logo:'https://flyfamily.live/flyfamily-logo.jpg',description:`Digital offspring of ADAM and ATOM. Birth ${birth.id}. Uncalibrated MaleCNS model; not biological mating.`,socials:{twitter:'https://x.com/flyfamilyrh',telegram:'',discord:'',website:'https://flyfamily.live/',farcaster:''},creatorFeeRecipient:getAddress(owner),creatorTaxBps:CHILD_CREATOR_TAX_BPS,buybackEnabled:false,expectedEconomics:economics,salt:'0x'+birth.id};
  const tx={chainId:chain.chainId,from:getAddress(owner),to:chain.factory,value:fee,data:new Interface(FACTORY_ABI).encodeFunctionData('launchToken',[params,configId,ZeroAddress])};
  await rpc.call(tx);const estimate=await rpc.estimateGas(tx),fees=await rpc.getFeeData();const gasPrice=(fees.gasPrice??0n)*2n;if(!gasPrice)throw Error('GAS_UNAVAILABLE');const gasLimit=estimate*120n/100n,maximum=fee+gasLimit*gasPrice;
- if(BigInt(spentWei)+maximum>parseEther(TOTAL_BUDGET_ETH))throw Error('TOTAL_BUDGET_EXCEEDED');
+ enforceLaunchBudget({birth,owner,spentWei,maximumWei:maximum});
+ if(await rpc.getBalance(owner)<maximum)throw Error('INSUFFICIENT_LAUNCH_BALANCE');
  return {tx:{...tx,gasLimit:gasLimit.toString(),gasPrice:gasPrice.toString(),value:fee.toString()},params,maximumWei:maximum.toString(),preparedAt:new Date().toISOString()};
 }
 export async function verifyOffspring({birth,chain,rpc,owner}){

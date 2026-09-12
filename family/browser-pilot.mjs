@@ -16,7 +16,7 @@ function save(){state.asOf=new Date().toISOString();writeFileSync(resolve(dir,'b
 function note(message){state.log.push({time:new Date().toISOString(),message});state.log=state.log.slice(-30);save();console.log(message);}
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 try{
- if(process.env.FAMILY_BROWSER_CDP){if(process.env.FAMILY_BROWSER_CDP!=='http://127.0.0.1:5192')throw Error('INVALID_BROWSER_ENDPOINT');browser=await chromium.connectOverCDP(process.env.FAMILY_BROWSER_CDP);sharedBrowser=true;pilotPage=await browser.contexts()[0].newPage();}else{browser=await chromium.launchPersistentContext(resolve(root,'build/external-pilot/browser-profile'),{channel:'chrome',headless:true,viewport:{width:1280,height:720}});pilotPage=await browser.newPage();}const page=pilotPage;
+ if(process.env.FAMILY_BROWSER_CDP){if(process.env.FAMILY_BROWSER_CDP!=='http://127.0.0.1:5192')throw Error('INVALID_BROWSER_ENDPOINT');browser=await chromium.connectOverCDP(process.env.FAMILY_BROWSER_CDP);sharedBrowser=true;pilotPage=await browser.contexts()[0].newPage();}else{browser=await chromium.launchPersistentContext(resolve(root,'build/external-pilot/browser-profile'),{channel:'chrome',headless:true,locale:'en-US',viewport:{width:1280,height:720}});pilotPage=await browser.newPage();}const page=pilotPage;await page.setExtraHTTPHeaders({'Accept-Language':'en-US,en;q=0.9'});
  page.on('popup',p=>p.close());page.on('download',d=>d.cancel());
  page.on('pageerror',e=>note('Page error: '+e.message.slice(0,300)));
  const reads=new Set(['eth_call','eth_getBalance','eth_getCode','eth_blockNumber','eth_getBlockByNumber','eth_getTransactionReceipt','eth_getTransactionByHash','eth_getTransactionCount','eth_estimateGas','eth_gasPrice','eth_maxPriorityFeePerGas','eth_feeHistory']);

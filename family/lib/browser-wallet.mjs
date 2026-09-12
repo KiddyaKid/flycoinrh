@@ -1,6 +1,7 @@
-import {Contract,Interface,getAddress,ZeroAddress,keccak256,parseEther} from 'ethers';
+import {Contract,Interface,getAddress,ZeroAddress,keccak256} from 'ethers';
 import {FACTORY_ABI} from './pons.mjs';
-import {TOTAL_BUDGET_ETH,CHILD_CREATOR_TAX_BPS} from './operator-policy.mjs';
+import {CHILD_CREATOR_TAX_BPS} from './operator-policy.mjs';
+import {enforceLaunchBudget} from './launch-session.mjs';
 const launch=FACTORY_ABI.find(s=>s.startsWith('function launchToken('));
 const overload=launch.replace('address pairToken)','address pairToken,address[] snipeTaxExemptions)');
 export const PAGE_ABI=new Interface([...FACTORY_ABI,overload]);
@@ -24,6 +25,7 @@ export async function preparePageRequest({tx,birth,chain,owner,rpc,spentWei,veri
  const clean={chainId:chain.chainId,from:getAddress(owner),to:getAddress(chain.factory),data:tx.data,value:fee};
  await rpc.call(clean);const estimate=await rpc.estimateGas(clean),gasPrice=((await rpc.getFeeData()).gasPrice??0n)*2n;if(!gasPrice)throw Error('GAS_UNAVAILABLE');
  const gasLimit=estimate*120n/100n,maximumWei=fee+gasLimit*gasPrice;
- if(BigInt(spentWei)+maximumWei>parseEther(TOTAL_BUDGET_ETH))throw Error('TOTAL_BUDGET_EXCEEDED');
+ enforceLaunchBudget({birth,owner,spentWei,maximumWei});
+ if(await rpc.getBalance(owner)<maximumWei)throw Error('INSUFFICIENT_LAUNCH_BALANCE');
  return {tx:{...clean,value:String(fee),gasPrice:String(gasPrice),gasLimit:String(gasLimit)},maximumWei:String(maximumWei),source:'PONS browser eth_sendTransaction',preparedAt:new Date().toISOString()};
 }

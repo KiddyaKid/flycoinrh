@@ -4,7 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $settings = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
-$allowed = @('FAMILY_PYTHON','FAMILY_GRAPH','FAMILY_GRAPH_SHA256','FAMILY_ANNOTATIONS','FAMILY_OPERATOR_ADDRESS','FAMILY_STATE_DIR','FAMILY_PRIOR_TX_FILE','FAMILY_PUBLISH_FILE','FAMILY_PORT','FAMILY_RPC','FAMILY_OBSERVE_ONLY')
+$allowed = @('FAMILY_PYTHON','FAMILY_GRAPH','FAMILY_GRAPH_SHA256','FAMILY_ANNOTATIONS','FAMILY_OPERATOR_ADDRESS','FAMILY_STATE_DIR','FAMILY_PRIOR_TX_FILE','FAMILY_PUBLISH_FILE','FAMILY_PORT','FAMILY_RPC','FAMILY_OBSERVE_ONLY','FAMILY_LAUNCH_SESSION')
 foreach ($entry in $settings.PSObject.Properties) {
   if ($entry.Name -notin $allowed) { throw 'Unsupported configuration field. Only the separately bounded DPAPI live-test signer is supported.' }
   [Environment]::SetEnvironmentVariable($entry.Name,[string]$entry.Value,'Process')

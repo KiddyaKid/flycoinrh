@@ -4,6 +4,8 @@ import {readFileSync,writeFileSync,renameSync,existsSync,openSync,closeSync,unli
 import {resolve} from 'node:path';import {createHash} from 'node:crypto';import {createInterface} from 'node:readline/promises';import {DatabaseSync} from 'node:sqlite';
 import {Wallet,Transaction,keccak256,getAddress,formatEther} from 'ethers';
 import {provider} from './lib/pons.mjs';import {inspectPageRequest,preparePageRequest} from './lib/browser-wallet.mjs';import {verifyOffspring} from './lib/offspring-deploy.mjs';import {tradeIdentity} from './policy.mjs';
+import {reconcileWalletSpend} from './lib/wallet-spend.mjs';
+import {launchStatus,readSession,checkSessionBirth} from './lib/launch-session.mjs';
 import {localKey} from './lib/local-key.mjs';
 import {rawLogoCid} from './lib/logo-attestation.mjs';
 const reprice=process.argv.includes('--reprice');
@@ -17,8 +19,7 @@ function save(){writeFileSync(file+'.tmp',JSON.stringify(birth,(_,v)=>typeof v==
 function result(){writeFileSync(resolve(dir,'browser-result.json'),JSON.stringify({birthId:birth.id,digest:request.digest,hash:birth.hash}));}
 async function spent(excludeCurrent=false){
  const prior=JSON.parse(readFileSync(process.env.FAMILY_PRIOR_TX_FILE)),db=new DatabaseSync(dbFile,{readOnly:true});let rows;try{rows=db.prepare('SELECT payload FROM births').all().map(r=>JSON.parse(r.payload));}finally{db.close();}
- let sum=0n;const nonces=new Set();for(const h of new Set([chain.launchHash,prior.sweepHash,prior.claimHash,...rows.filter(b=>!excludeCurrent||b.id!==birth.id).map(b=>b.hash)].filter(Boolean))){const [r,t]=await Promise.all([rpc.getTransactionReceipt(h),rpc.getTransaction(h)]);if(!r||!t||t.from!==owner||(await rpc.getBlock(r.blockNumber)).hash!==r.blockHash)throw Error('RECONCILE_WALLET_TRANSACTIONS');sum+=r.gasUsed*r.gasPrice+(r.status===1?t.value:0n);nonces.add(t.nonce);}
- const latest=await rpc.getTransactionCount(owner,'latest'),pending=await rpc.getTransactionCount(owner,'pending');if(latest!==pending||latest!==nonces.size||[...nonces].some(n=>n>=latest))throw Error('RECONCILE_WALLET_NONCES');return sum;
+ return reconcileWalletSpend({rpc,owner,hashes:[chain.launchHash,prior.sweepHash,prior.claimHash,...rows.filter(b=>!excludeCurrent||b.id!==birth.id).map(b=>b.hash)]});
 }
 function keyPrompt(){return new Promise((ok,fail)=>{let value='';process.stdout.write('Private key (masked; local memory only): ');process.stdin.setRawMode(true);process.stdin.resume();const end=e=>{process.stdin.off('data',on);process.stdin.setRawMode(false);process.stdin.pause();process.stdout.write('\n');e?fail(e):ok(value);value='';};const on=data=>{for(const c of data.toString()){if(c==='\u0003')return end(Error('CANCELLED'));if(c==='\r'||c==='\n')return end();if(c==='\b'||c==='\u007f'){value=value.slice(0,-1);continue;}if(/[0-9a-fA-FxX]/.test(c)&&value.length<66){value+=c;process.stdout.write('*');}}};process.stdin.on('data',on);});}
 try{
@@ -49,7 +50,7 @@ try{
   const logo=process.env.FAMILY_LIVE_TEST==='1'?{birthId:birth.id,...rawLogoCid(readFileSync(resolve(root,'assets/flyfamily-logo.jpg')))}:JSON.parse(readFileSync(resolve(dir,'verified-logo.json')));
   if(logo.birthId!==birth.id||logo.url!==p.logo||logo.sourceSha256!==createHash('sha256').update(readFileSync(resolve(root,'assets/flyfamily-logo.jpg'))).digest('hex'))throw Error('LOGO_NOT_VERIFIED');
   const cost=await spent();const prepared=await preparePageRequest({tx:request.tx,birth,chain,owner,rpc,spentWei:cost,verifiedLogo:logo.url});birth.prepared={...birth.prepared,...prepared};birth.browserRequestDigest=request.digest;save();
-  console.log(JSON.stringify({status:'ready-for-local-signature',name:birth.name,source:'actual PONS page request',owner,maximumETH:formatEther(prepared.maximumWei),alreadySpentETH:formatEther(cost),totalBudgetETH:'0.02',testLimit:1}));
+  console.log(JSON.stringify({status:'ready-for-local-signature',name:birth.name,source:'actual PONS page request',owner,maximumETH:formatEther(prepared.maximumWei),alreadySpentETH:formatEther(cost),totalBudgetETH:launchStatus().budgetETH??'0.02'}));
   if(!execute)process.exitCode=0;
   else{
    if(!automatic){const prompt=createInterface({input:process.stdin,output:process.stdout});const yes=await prompt.question('Type DEPLOY to sign ONE page-requested test launch: ');prompt.close();if(yes!=='DEPLOY')throw Error('CANCELLED');}
@@ -58,7 +59,7 @@ try{
   }
  }
  if(birth.status==='submitted'){
-  if(!await rpc.getTransaction(birth.hash)&&execute&&existsSync(rawFile))await rpc.broadcastTransaction(readFileSync(rawFile,'utf8'));
+  if(!await rpc.getTransaction(birth.hash)&&execute&&existsSync(rawFile)){if(process.env.FAMILY_LAUNCH_SESSION)checkSessionBirth(readSession(),birth,owner);await rpc.broadcastTransaction(readFileSync(rawFile,'utf8'));}
   result();for(let i=0;i<60;i++){const v=await verifyOffspring({birth,chain,rpc,owner});if(v){birth={...birth,...v};delete birth.preparationError;save();break;}await new Promise(r=>setTimeout(r,2000));}
  }
  if(birth.status==='confirmed'){
