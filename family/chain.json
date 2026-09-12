@@ -1,0 +1,18 @@
+{
+  "chainId": 4663,
+  "rpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+  "token": "0x425522a0DD5F658662854946841Dc811327BD12A",
+  "curve": "0xc22a5Dee6Cf938bcE0c61F2f089978D66A655592",
+  "factory": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+  "tokenCodeHash": "0x789ac8bee2e8d1de9e182253414218cbee9d5028bad4103291e9cad38e8af006",
+  "curveCodeHash": "0x2130485153023c25e8effce25b0b73d781b58dabdce44fb1e99a6898ca582045",
+  "factoryCodeHash": "0x89a27da6f703e0a7cdd4f233e7cb57604ff75b164530962d3ff7cf8483a67d84",
+  "launchHash": "0xf5e1038380dbe532a4cb2bf0b4937c26ab77b204403fd9d2dfb3b0ab6782d964",
+  "launchBlock": 60335178,
+  "recordedTradeHashes": [
+    "0xdb9cabef1f78e5c6752376e743e91f59fb62dd2fed20e68de8fe8702784f76e2",
+    "0x585a020a8cda940325e405d76e209f196e2fd490625631480fc851dcc3230779",
+    "0x9431588751f2cfbb4c8880ff7816458a6f0447dced0bd80af560f0c072ac02ce"
+  ],
+  "valuationMethod": "curve-fdv"
+}

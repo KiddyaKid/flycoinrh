@@ -1,0 +1,9 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {tradeIdentity,volumeSurge,neuralName,nextEgg,canStartEgg,publicBirth} from './policy.mjs';
+const report={neurons:165122,graphSha256:'a'.repeat(64),parents:[{id:'adam',active:3,rates:{forward:1}},{id:'atom',active:4,rates:{forward:2}}]};
+test('identity distinguishes two logs in one transaction',()=>{const t={hash:'0x'+'1'.repeat(64),index:0,kind:'buy',quoteWei:'12',timestamp:0};assert.notEqual(tradeIdentity(t),tradeIdentity({...t,index:1}));});
+test('name is reproducible and changes with measured output',()=>{assert.deepEqual(neuralName(report),neuralName(structuredClone(report)));assert.notEqual(neuralName(report).fingerprint,neuralName({...report,parents:[...report.parents.slice(0,1),{id:'atom',active:5,rates:{forward:3}}]}).fingerprint);assert.throws(()=>neuralName({...report,neurons:10}));});
+test('surge needs prior baseline and a minimum volume',()=>{const now=600000,t=(timestamp,index,quoteWei)=>({hash:'0x'+'1'.repeat(64),kind:'buy',timestamp,index,quoteWei});const prior=Array.from({length:5},(_,i)=>t(350000+i*40000,i,'100000000000000'));const recent=Array.from({length:4},(_,i)=>t(now,i+5,'500000000000000'));assert.equal(volumeSurge(recent,now),null);assert.equal(volumeSurge([...prior,...recent],now).kind,'surge');});
+test('birth id idempotent; pending signature blocks repeated spawning',()=>{const event={hash:'0x'+'1'.repeat(64),index:0,kind:'sell',quoteWei:'10',timestamp:0};const b=nextEgg({event,readout:report});assert.equal(b.id,nextEgg({event,readout:report}).id);assert.equal(canStartEgg([b],Date.now()+1e6),false);assert.equal(canStartEgg([{...b,status:'confirmed'}],Date.now()+1e6),true);assert.equal(publicBirth({...b,prepared:{secret:'no'}}).prepared,undefined);});
+
+test('wall-clock and random request IDs cannot change a neural name',()=>{assert.deepEqual(neuralName({...report,id:'a',asOf:'today'}),neuralName({...report,id:'b',asOf:'tomorrow'}));});
