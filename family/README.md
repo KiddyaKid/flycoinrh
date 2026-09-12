@@ -10,6 +10,10 @@ The normal run prepares deployments but does not sign. An operator may enable `-
 
 ## Mechanism v2
 
+### Windows operation
+
+`powershell -File family/manage.ps1 -Action Status -Config C:\path\family-runtime.json` checks the worker without exposing publisher secrets. The JSON contains the same non-secret environment values/secret-file paths as `.env.example`. Use `Start` to launch a hidden, logged preparation-only worker, or `Stop` for a graceful shutdown after the current model window. The launcher never enables signing, will not create a second worker, and leaves the ledger intact. It is not a cloud service or an automatic Windows startup task; the computer must stay awake. If an old worker predates the stop-file support, stop it from its owning terminal once before using this launcher.
+
 - Only canonical, receipt-verified CurveBuy / CurveSell events after the starting cursor enter the queue; 20-block confirmation buffer. Pool graduation pauses until a verified adapter exists.
 - Each buy/sell is a trigger; a minute containing >=4 trades, >=0.001 ETH, >=3x the previous five-minute average and >=5 baseline trades can additionally trigger one surge.
 - One egg/deployment at a time, >=60 seconds between eggs, 8 waiting events, expire after 15 minutes. Overflow and expiry are recorded internally. No one-child lifetime limit. Insufficient or unreconciled budget pauses signing.

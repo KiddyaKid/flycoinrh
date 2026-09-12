@@ -94,6 +94,7 @@ try{
  await page.goto(`https://www.ponsfamily.com/launchpad/${chain.token}`,{waitUntil:'domcontentloaded'});
  let chainAt=0,brainAt=0;
  while(running){
+  try{if(readFileSync(resolve(folder,'stop.request'),'utf8').trim()===String(process.pid)){running=false;unlinkSync(resolve(folder,'stop.request'));break;}}catch{}
   try{jpg=await page.screenshot({type:'jpeg',quality:55});frameAt=new Date().toISOString();cameraError=null;}catch{cameraError='Camera unavailable';}
   if(Date.now()-chainAt>10000){try{await collect();observerError=null;}catch(e){observerError=/^[A-Z_]+$/.test(e.message)?e.message:'CHAIN_UNAVAILABLE';}chainAt=Date.now();}
   if(worker&&Date.now()-brainAt>10000){try{neural={...await think(null),asOf:new Date().toISOString()};}catch{cameraError='Neural readout unavailable';}brainAt=Date.now();}
