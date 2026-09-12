@@ -15,3 +15,5 @@ The scanner polls with a durable SQLite cursor, waits 20 confirmation blocks, ve
 Observation does not grant signing authority. The local allowance remains one additional child, a cumulative 0.02 ETH budget, the exact source CA, expiry and bound birth ID. No private key enters this repository, browser or public snapshot. A paused browser attempt is not automatically retried and must never be reset into a second birth. Existing signed transactions must be reconciled by their saved hash rather than signed again.
 
 The video port exposes only `/video.mjpeg`. Local previews connect directly; remote viewers use the published video tunnel and reconnect or fall back to the timestamped snapshot when unavailable.
+
+The observer now reuses the persistent Chrome profile and exposes a read-only wallet bridge for the operator address. Its status is reported separately from signing. With `FAMILY_OBSERVE_ONLY=1`, the birth coordinator is disabled while browser, neural measurements and TX ingestion continue. Future authorized launch pilots attach to the same local browser on port 5192 and close only their page/client connection; they do not close the observer.

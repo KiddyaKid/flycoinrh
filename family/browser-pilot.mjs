@@ -9,13 +9,13 @@ import {provider} from './lib/pons.mjs';
 const root=resolve(import.meta.dirname,'..'),dir=resolve(process.env.FAMILY_PILOT_DIR??resolve(root,'build/external-pilot')),owner='0x9cA6276184A59d23Ef97e1CD06c02C4A6Af3322C';
 const birth=JSON.parse(readFileSync(resolve(dir,'pilot.json'))),chain=JSON.parse(readFileSync(resolve(import.meta.dirname,'chain.json'))),rpc=provider(chain.rpcUrl);
 if(birth.status!=='awaiting-signature'||birth.hash)throw Error('PILOT_NOT_READY');
-mkdirSync(dir,{recursive:true});let browser,brain,answer,stopCapture,lastJpg=null,streaming=false,requested=false,x=640,y=500;
+mkdirSync(dir,{recursive:true});let browser,pilotPage,sharedBrowser=false,brain,answer,stopCapture,lastJpg=null,streaming=false,requested=false,x=640,y=500;
 const state={status:'opening',asOf:new Date().toISOString(),url:'',log:[],cursor:null,transactionRequested:false,hitCount:0};
 function save(){state.asOf=new Date().toISOString();writeFileSync(resolve(dir,'browser-state.tmp'),JSON.stringify(state));try{renameSync(resolve(dir,'browser-state.tmp'),resolve(dir,'browser-state.json'));}catch(e){if(!['EPERM','EACCES','ENOENT'].includes(e.code))throw e;}}
 function note(message){state.log.push({time:new Date().toISOString(),message});state.log=state.log.slice(-30);save();console.log(message);}
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 try{
- browser=await chromium.launchPersistentContext(resolve(root,'build/external-pilot/browser-profile'),{channel:'chrome',headless:true,viewport:{width:1280,height:720}});const page=await browser.newPage();
+ if(process.env.FAMILY_BROWSER_CDP){if(process.env.FAMILY_BROWSER_CDP!=='http://127.0.0.1:5192')throw Error('INVALID_BROWSER_ENDPOINT');browser=await chromium.connectOverCDP(process.env.FAMILY_BROWSER_CDP);sharedBrowser=true;pilotPage=await browser.contexts()[0].newPage();}else{browser=await chromium.launchPersistentContext(resolve(root,'build/external-pilot/browser-profile'),{channel:'chrome',headless:true,viewport:{width:1280,height:720}});pilotPage=await browser.newPage();}const page=pilotPage;
  page.on('popup',p=>p.close());page.on('download',d=>d.cancel());
  page.on('pageerror',e=>note('Page error: '+e.message.slice(0,300)));
  const reads=new Set(['eth_call','eth_getBalance','eth_getCode','eth_blockNumber','eth_getBlockByNumber','eth_getTransactionReceipt','eth_getTransactionByHash','eth_getTransactionCount','eth_estimateGas','eth_gasPrice','eth_maxPriorityFeePerGas','eth_feeHistory']);
@@ -91,6 +91,6 @@ try{
  if(requested){for(let n=0;n<600&&state.status==='awaiting-local-signature';n++)await wait(1000);}
  await wait(30000);streaming=false;await stream;
 }catch(e){state.status='paused';note('Browser pilot paused: '+e.message.slice(0,500));}
-finally{streaming=false;await stopCapture?.();brain?.kill();await browser?.close();rpc.destroy();}
+finally{streaming=false;await stopCapture?.();brain?.kill();if(sharedBrowser)await pilotPage?.close();await browser?.close();rpc.destroy();}
 
 

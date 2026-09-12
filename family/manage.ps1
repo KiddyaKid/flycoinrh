@@ -4,7 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $settings = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
-$allowed = @('FAMILY_PYTHON','FAMILY_GRAPH','FAMILY_GRAPH_SHA256','FAMILY_ANNOTATIONS','FAMILY_OPERATOR_ADDRESS','FAMILY_STATE_DIR','FAMILY_PRIOR_TX_FILE','FAMILY_PUBLISH_FILE','FAMILY_PORT','FAMILY_RPC')
+$allowed = @('FAMILY_PYTHON','FAMILY_GRAPH','FAMILY_GRAPH_SHA256','FAMILY_ANNOTATIONS','FAMILY_OPERATOR_ADDRESS','FAMILY_STATE_DIR','FAMILY_PRIOR_TX_FILE','FAMILY_PUBLISH_FILE','FAMILY_PORT','FAMILY_RPC','FAMILY_OBSERVE_ONLY')
 foreach ($entry in $settings.PSObject.Properties) {
   if ($entry.Name -notin $allowed) { throw 'Unsupported configuration field. Only the separately bounded DPAPI live-test signer is supported.' }
   [Environment]::SetEnvironmentVariable($entry.Name,[string]$entry.Value,'Process')
@@ -53,7 +53,8 @@ if ($Action -eq 'Start' -and -not $workerProcess) {
   if ($videoShell -and (Test-Path -LiteralPath $videoHelper)) {
     Start-Process -FilePath $videoShell.Source -ArgumentList @('-NoProfile','-File',('"'+$videoHelper+'"'),'-WorkerId',$started.Id) -WindowStyle Hidden -RedirectStandardError (Join-Path $stateDir "video-helper-$stamp.err.log") | Out-Null
   }
-  Write-Output "Started worker PID $($started.Id), bounded live test. Check Status after the graph loads."
+  $modeLabel=if($env:FAMILY_OBSERVE_ONLY -eq "1"){"observation only; signing paused"}else{"bounded live test"}
+  Write-Output "Started worker PID $($started.Id), $modeLabel. Check Status after the graph loads."
   exit 0
 }
 try {
