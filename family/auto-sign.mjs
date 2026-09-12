@@ -1,7 +1,7 @@
 import {readFileSync,writeFileSync,existsSync,openSync,closeSync,unlinkSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {spawn} from 'node:child_process';
-const dir=resolve(import.meta.dirname,'../build/external-pilot'),lockFile=resolve(dir,'auto-sign.lock');
+const dir=resolve(process.env.FAMILY_PILOT_DIR??resolve(import.meta.dirname,'../build/external-pilot')),lockFile=resolve(dir,'auto-sign.lock');
 const lock=openSync(lockFile,'wx');writeFileSync(lock,String(process.pid));
 function state(status){writeFileSync(resolve(dir,'auto-sign-state.json'),JSON.stringify({status,asOf:new Date().toISOString(),pid:process.pid}));}
 try{

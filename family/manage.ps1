@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $settings = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
 $allowed = @('FAMILY_PYTHON','FAMILY_GRAPH','FAMILY_GRAPH_SHA256','FAMILY_ANNOTATIONS','FAMILY_OPERATOR_ADDRESS','FAMILY_STATE_DIR','FAMILY_PRIOR_TX_FILE','FAMILY_PUBLISH_FILE','FAMILY_PORT','FAMILY_RPC')
 foreach ($entry in $settings.PSObject.Properties) {
-  if ($entry.Name -notin $allowed) { throw 'Unsupported configuration field. This launcher does not enable signing.' }
+  if ($entry.Name -notin $allowed) { throw 'Unsupported configuration field. Only the separately bounded DPAPI live-test signer is supported.' }
   [Environment]::SetEnvironmentVariable($entry.Name,[string]$entry.Value,'Process')
 }
 # A shell that previously enabled signing cannot carry that permission into this launcher.
@@ -48,7 +48,12 @@ if ($Action -eq 'Start' -and -not $workerProcess) {
   $awakeScript = Join-Path $PSScriptRoot 'keep-awake.ps1'
   $awakeStatus = Join-Path $stateDir "awake-$($started.Id)-$stamp.json"
   Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile','-File',('"'+$awakeScript+'"'),'-WorkerId',$started.Id,'-StatusFile',('"'+$awakeStatus+'"')) -WindowStyle Hidden -RedirectStandardError (Join-Path $stateDir "awake-$stamp.err.log") | Out-Null
-  Write-Output "Started worker PID $($started.Id), preparation only. Check Status after the graph loads."
+  $videoHelper=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../scripts/family-video-tunnel.ps1'))
+  $videoShell=Get-Command pwsh -ErrorAction SilentlyContinue
+  if ($videoShell -and (Test-Path -LiteralPath $videoHelper)) {
+    Start-Process -FilePath $videoShell.Source -ArgumentList @('-NoProfile','-File',('"'+$videoHelper+'"'),'-WorkerId',$started.Id) -WindowStyle Hidden -RedirectStandardError (Join-Path $stateDir "video-helper-$stamp.err.log") | Out-Null
+  }
+  Write-Output "Started worker PID $($started.Id), bounded live test. Check Status after the graph loads."
   exit 0
 }
 try {

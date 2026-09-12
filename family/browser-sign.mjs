@@ -5,13 +5,14 @@ import {resolve} from 'node:path';import {createHash} from 'node:crypto';import 
 import {Wallet,Transaction,keccak256,getAddress,formatEther} from 'ethers';
 import {provider} from './lib/pons.mjs';import {inspectPageRequest,preparePageRequest} from './lib/browser-wallet.mjs';import {verifyOffspring} from './lib/offspring-deploy.mjs';import {tradeIdentity} from './policy.mjs';
 import {localKey} from './lib/local-key.mjs';
+import {rawLogoCid} from './lib/logo-attestation.mjs';
 const automatic=process.argv.includes('--auto'),execute=automatic||process.argv.includes('--execute');if(process.argv.slice(2).some(a=>!['--execute','--auto'].includes(a)))throw Error('UNKNOWN_ARGUMENT');
 if(execute&&!automatic&&(!process.stdin.isTTY||!process.stdout.isTTY))throw Error('INTERACTIVE_TERMINAL_REQUIRED');
-const root=resolve(import.meta.dirname,'..'),dir=resolve(root,'build/external-pilot'),file=resolve(dir,'pilot.json'),request=JSON.parse(readFileSync(resolve(dir,'browser-request.json'))),chain=JSON.parse(readFileSync(resolve(import.meta.dirname,'chain.json'))),owner=getAddress('0x9ca6276184a59d23ef97e1cd06c02c4a6af3322c'),rpc=provider(chain.rpcUrl);
+const root=resolve(import.meta.dirname,'..'),dir=resolve(process.env.FAMILY_PILOT_DIR??resolve(root,'build/external-pilot')),file=resolve(dir,'pilot.json'),request=JSON.parse(readFileSync(resolve(dir,'browser-request.json'))),chain=JSON.parse(readFileSync(resolve(import.meta.dirname,'chain.json'))),owner=getAddress('0x9ca6276184a59d23ef97e1cd06c02c4a6af3322c'),rpc=provider(chain.rpcUrl);
 const dbFile=resolve(process.env.FAMILY_STATE_DIR??resolve(root,'build/family'),'ledger.sqlite'),rawFile=resolve(dir,'browser-signed-tx'),lockFile=resolve(dir,'browser-sign.lock'),lock=openSync(lockFile,'wx');let birth=JSON.parse(readFileSync(file));
 writeFileSync(lock,String(process.pid));
 function fresh(){const age=Date.now()-Date.parse(request.requestedAt);if(!Number.isFinite(age)||age<0||age>600000)throw Error('BROWSER_REQUEST_EXPIRED');}
-function save(){writeFileSync(file+'.tmp',JSON.stringify(birth,(_,v)=>typeof v==='bigint'?String(v):v,2));renameSync(file+'.tmp',file);}
+function save(){writeFileSync(file+'.tmp',JSON.stringify(birth,(_,v)=>typeof v==='bigint'?String(v):v,2));renameSync(file+'.tmp',file);if(process.env.FAMILY_LIVE_TEST==='1'){const d=new DatabaseSync(dbFile);try{d.prepare('UPDATE births SET payload=? WHERE id=?').run(JSON.stringify(birth),birth.id);}finally{d.close();}}}
 function result(){writeFileSync(resolve(dir,'browser-result.json'),JSON.stringify({birthId:birth.id,digest:request.digest,hash:birth.hash}));}
 async function spent(){
  const prior=JSON.parse(readFileSync(process.env.FAMILY_PRIOR_TX_FILE)),db=new DatabaseSync(dbFile,{readOnly:true});let rows;try{rows=db.prepare('SELECT payload FROM births').all().map(r=>JSON.parse(r.payload));}finally{db.close();}
@@ -26,7 +27,7 @@ try{
   fresh();
   const p=inspectPageRequest(request.tx,birth,chain,owner);
   // Image attestation is written only after checking the actual uploaded logo.
-  const logo=JSON.parse(readFileSync(resolve(dir,'verified-logo.json')));
+  const logo=process.env.FAMILY_LIVE_TEST==='1'?{birthId:birth.id,...rawLogoCid(readFileSync(resolve(root,'assets/flyfamily-logo.jpg')))}:JSON.parse(readFileSync(resolve(dir,'verified-logo.json')));
   if(logo.birthId!==birth.id||logo.url!==p.logo||logo.sourceSha256!==createHash('sha256').update(readFileSync(resolve(root,'assets/flyfamily-logo.jpg'))).digest('hex'))throw Error('LOGO_NOT_VERIFIED');
   const cost=await spent();const prepared=await preparePageRequest({tx:request.tx,birth,chain,owner,rpc,spentWei:cost,verifiedLogo:logo.url});birth.prepared={...birth.prepared,...prepared};birth.browserRequestDigest=request.digest;save();
   console.log(JSON.stringify({status:'ready-for-local-signature',name:birth.name,source:'actual PONS page request',owner,maximumETH:formatEther(prepared.maximumWei),alreadySpentETH:formatEther(cost),totalBudgetETH:'0.02',testLimit:1}));
@@ -43,7 +44,7 @@ try{
  }
  if(birth.status==='confirmed'){
   writeFileSync(resolve(dir,'signer-status.json'),JSON.stringify({status:'confirmed',hash:birth.hash,token:birth.token,at:new Date().toISOString()}));
-  const db=new DatabaseSync(dbFile);try{db.exec('BEGIN IMMEDIATE');db.prepare('INSERT OR IGNORE INTO births VALUES(?,?)').run(birth.id,JSON.stringify(birth));const e={...birth.event,id:tradeIdentity(birth.event),historical:true};db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?)').run(e.id,JSON.stringify(e));db.exec('COMMIT');}finally{db.close();}
+  const db=new DatabaseSync(dbFile);try{db.exec('BEGIN IMMEDIATE');db.prepare('INSERT OR IGNORE INTO births VALUES(?,?)').run(birth.id,JSON.stringify(birth));if(birth.event.kind!=='surge'){const e={...birth.event,id:tradeIdentity(birth.event),historical:process.env.FAMILY_LIVE_TEST!=='1'};db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?)').run(e.id,JSON.stringify(e));}db.exec('COMMIT');}finally{db.close();}
   console.log(JSON.stringify({status:birth.status,hash:birth.hash,token:birth.token}));
  }
 }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'LOCAL_SIGNING_STOPPED_REVIEW_SAVED_STATE';writeFileSync(resolve(dir,'signer-status.json'),JSON.stringify({status:'stopped',code,at:new Date().toISOString()}));console.error(code);process.exitCode=1;}

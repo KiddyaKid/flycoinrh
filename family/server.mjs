@@ -1,13 +1,16 @@
 // One process owns the browser, confirmed-chain cursor and durable birth queue.
 // Public HTTP is read-only. Signing is opt-in, never reachable from browser input.
 import {createServer} from 'node:http';
+import {runLane} from './lib/live-loop.mjs';
+import {videoServer,captureBrowser} from './lib/live-camera.mjs';
+import {bindLiveAllowance} from './lib/live-authorization.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,writeFileSync,mkdirSync,renameSync,openSync,closeSync,unlinkSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {chromium} from 'playwright';
-import {Contract,Interface,Wallet,getAddress,keccak256,parseEther} from 'ethers';
+import {Contract,Interface,getAddress,keccak256} from 'ethers';
 import {provider,CURVE_ABI} from './lib/pons.mjs';
 import {prepareOffspring,verifyOffspring} from './lib/offspring-deploy.mjs';
 import {readPilotView} from './lib/pilot-view.mjs';
@@ -25,8 +28,13 @@ const put=(k,v)=>db.prepare('INSERT INTO meta VALUES(?,?) ON CONFLICT(k) DO UPDA
 const births=()=>db.prepare('SELECT payload FROM births ORDER BY rowid').all().map(r=>JSON.parse(r.payload));
 const save=b=>db.prepare('INSERT INTO births VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(b.id,JSON.stringify(b));
 if(!get('runId'))put('runId',crypto.randomUUID());
-let running=true,browser,page,jpg=null,frameAt=null,neural=null,cameraError=null,observerError=null,revision=get('revision')??0,activeBrowserBirth=null;
-let worker=null,answer=null;
+let running=true,browser,page,jpg=null,frameAt=null,neural=null,cameraError=null,observerError=null,revision=get('revision')??0;
+let worker=null,answer=null,stopCapture,scan=null,unconfirmed=[],processing=null,brainBusy=false,loopTimes={};
+const stamp=()=>new Date().toISOString();
+function videoUrl(){try{const u=new URL(readFileSync(resolve(folder,'video-origin.txt'),'utf8').trim());return u.protocol==='https:'&&u.hostname.endsWith('.trycloudflare.com')?new URL('/video.mjpeg',u).href:null;}catch{return null;}}
+db.exec('CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, hash TEXT)');
+function journal(kind,detail,hash=null){db.prepare('INSERT INTO journal(at,kind,detail,hash) VALUES(?,?,?,?)').run(stamp(),kind,detail,hash);}
+function job(stage,detail,hash=null){processing={stage,detail,hash,asOf:stamp()};journal(stage,detail,hash);}
 function startBrain(){
  if(!process.env.FAMILY_GRAPH||!process.env.FAMILY_GRAPH_SHA256||!process.env.FAMILY_ANNOTATIONS){cameraError='Brain data not configured';return;}
  worker=spawn(process.env.FAMILY_PYTHON??'python',[resolve(import.meta.dirname,'brain.py')],{cwd:root,windowsHide:true,stdio:['pipe','pipe','pipe']});
@@ -36,14 +44,17 @@ function startBrain(){
  worker.on('exit',()=>{worker=null;if(answer){answer.reject(Error('BRAIN_WORKER_STOPPED'));answer=null;}});
 }
 async function think(kind){if(!worker||!jpg)throw Error('BRAIN_OR_FRAME_UNAVAILABLE');const path=resolve(folder,'brain-frame.jpg');writeFileSync(path,jpg);const id=crypto.randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{answer=null;worker?.kill();reject(Error('BRAIN_TIMEOUT'));},120000);answer={resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}};worker.stdin.write(JSON.stringify({id,frame:path,kind})+'\n');});}
-function snapshot(){const all=births(),pilot=readPilotView(root);if(pilot&&!all.some(b=>b.id===pilot.birth.id))all.push(pilot.birth);const stored=db.prepare('SELECT payload FROM trades ORDER BY rowid DESC LIMIT 30').all().map(r=>JSON.parse(r.payload)),records=[...new Map([...(pilot?[pilot.record]:[]),...stored].map(r=>[r.id,r])).values()].sort((a,b)=>b.timestamp-a.timestamp).slice(0,30);return {schema:'flyfamily.live.v1',ruleVersion:VERSION,runId:get('runId'),revision,asOf:new Date().toISOString(),status:observerError?'unavailable':'watching',observerError,camera:pilot?.camera??{status:frameAt&&Date.now()-Date.parse(frameAt)<15000?'live':'offline',asOf:frameAt,url:page?.url()??null,error:cameraError},frame:pilot?.frame??(jpg?'data:image/jpeg;base64,'+jpg.toString('base64'):null),browserControl:pilot?.browserControl??null,neural,births:all.slice(-100).map(publicBirth),offspringCount:all.filter(b=>b.status==='confirmed'&&b.receiptVerified===true).length,queueDepth:db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n,records,cursor:get('cursor'),social:X_URL,logo:LOGO_URL};}
+function snapshot(){const all=births(),pilot=readPilotView(root);if(pilot&&!all.some(b=>b.id===pilot.birth.id))all.push(pilot.birth);const stored=db.prepare('SELECT payload FROM trades ORDER BY rowid DESC LIMIT 30').all().map(r=>JSON.parse(r.payload)),records=[...new Map([...(pilot?[pilot.record]:[]),...stored].map(r=>[r.id,r])).values()].sort((a,b)=>b.timestamp-a.timestamp).slice(0,30);return {schema:'flyfamily.live.v1',ruleVersion:VERSION,runId:get('runId'),revision,asOf:new Date().toISOString(),status:observerError?'unavailable':'watching',observerError,camera:pilot?.camera??{status:frameAt&&Date.now()-Date.parse(frameAt)<15000?'live':'offline',asOf:frameAt,url:page?.url()??null,error:cameraError},frame:pilot?.frame??(jpg?'data:image/jpeg;base64,'+jpg.toString('base64'):null),browserControl:pilot?.browserControl??null,neural,births:all.slice(-100).map(publicBirth),offspringCount:all.filter(b=>b.status==='confirmed'&&b.receiptVerified===true).length,queueDepth:db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n,records:records.map(t=>({...t,processing:db.prepare('SELECT status FROM triggers WHERE id=?').get(t.id)?.status??'historical'})),recordCount:db.prepare('SELECT count(*) n FROM trades').get().n,journal:db.prepare('SELECT * FROM journal ORDER BY id DESC LIMIT 60').all(),scan,unconfirmed,processing,loopTimes,videoUrl:videoUrl(),execution:{mode:'bounded-live-test',reason:'One additional live child; cumulative budget 0.02 ETH'},cursor:get('cursor'),social:X_URL,logo:LOGO_URL};}
 let publisher=null;try{publisher=JSON.parse(readFileSync(process.env.FAMILY_PUBLISH_FILE,'utf8'));}catch{}
 async function publish(){revision++;put('revision',revision);const s=snapshot();writeFileSync(resolve(folder,'snapshot.tmp'),JSON.stringify(s));renameSync(resolve(folder,'snapshot.tmp'),resolve(folder,'snapshot.json'));if(publisher){const u=new URL('/api/family',publisher.endpoint);const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-Fruit-Ingest-Key':publisher.ingestKey},body:JSON.stringify(s),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('PUBLICATION_FAILED_'+r.status);}}
 function enqueue(e){const count=db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n;db.prepare('INSERT OR IGNORE INTO triggers VALUES(?,?,?)').run(e.id,JSON.stringify(e),count<MAX_PENDING?'queued':'capacity');}
 async function collect(){
  if(Number((await rpc.getNetwork()).chainId)!==chain.chainId)throw Error('WRONG_CHAIN');
- const top=await rpc.getBlock('latest'),head=await rpc.getBlock(top.number-20);
+ const started=Date.now(),top=await rpc.getBlock('latest'),head=await rpc.getBlock(top.number-20);
+ scan={...scan,startedAt:stamp(),checkingHead:top.number,confirmations:20,token:chain.token,intervalMs:3000};
  if(Date.now()-head.timestamp*1000>180000)throw Error('STALE_CHAIN');
+ const provisional=await rpc.getLogs({address:chain.curve,fromBlock:head.number+1,toBlock:top.number,topics:[[abi.getEvent('CurveBuy').topicHash,abi.getEvent('CurveSell').topicHash]]});
+ unconfirmed=provisional.filter(l=>!l.removed).slice(-10).map(l=>{const e=abi.parseLog(l),kind=e.name==='CurveBuy'?'buy':'sell';return {id:l.transactionHash+':'+l.index,hash:l.transactionHash,block:l.blockNumber,kind,confirmations:top.number-l.blockNumber,requiredConfirmations:20,quoteWei:String(kind==='buy'?e.args.quoteIn:e.args.quoteOut)};});
  for(const k of ['token','curve','factory'])if(keccak256(await rpc.getCode(chain[k],head.number))!==chain[k+'CodeHash'])throw Error('CODE_CHANGED');
  if(await new Contract(chain.curve,['function graduated() view returns(bool)'],rpc).graduated({blockTag:head.number}))throw Error('POOL_ADAPTER_REQUIRED_AFTER_GRADUATION');
  let cursor=get('cursor');if(!get('historyImported')){
@@ -53,7 +64,7 @@ async function collect(){
  if(!cursor){put('cursor',{number:head.number,hash:head.hash});return;}
 
  if((await rpc.getBlock(cursor.number))?.hash!==cursor.hash)throw Error('CHAIN_REORGANIZED');
- const to=Math.min(head.number,cursor.number+1500);if(to<=cursor.number)return;
+ const to=Math.min(head.number,cursor.number+1500);if(to<=cursor.number){scan={...scan,completedAt:stamp(),head:top.number,safeHead:head.number,scannedThrough:cursor.number,lagBlocks:head.number-cursor.number,durationMs:Date.now()-started};return;}
  const logs=await rpc.getLogs({address:chain.curve,fromBlock:cursor.number+1,toBlock:to,topics:[[abi.getEvent('CurveBuy').topicHash,abi.getEvent('CurveSell').topicHash]]});const rows=[];
  for(const log of logs.sort((a,b)=>a.blockNumber-b.blockNumber||a.index-b.index)){
   const [receipt,block]=await Promise.all([rpc.getTransactionReceipt(log.transactionHash),rpc.getBlock(log.blockNumber)]);
@@ -61,7 +72,8 @@ async function collect(){
   const e=abi.parseLog(log),kind=e.name==='CurveBuy'?'buy':'sell',t={hash:log.transactionHash,index:log.index,kind,quoteWei:String(kind==='buy'?e.args.quoteIn:e.args.quoteOut),timestamp:block.timestamp*1000,block:log.blockNumber,blockHash:block.hash};t.id=tradeIdentity(t);rows.push(t);
  }
  const end=await rpc.getBlock(to);if((await rpc.getBlock(head.number))?.hash!==head.hash)throw Error('CHAIN_REORGANIZED');
- db.exec('BEGIN IMMEDIATE');try{for(const t of rows){const inserted=db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?)').run(t.id,JSON.stringify(t));if(inserted.changes)enqueue(t);}put('cursor',{number:to,hash:end.hash});const recent=db.prepare('SELECT payload FROM trades ORDER BY rowid DESC LIMIT 3000').all().map(r=>JSON.parse(r.payload));const surge=volumeSurge(recent,head.timestamp*1000);if(surge)enqueue(surge);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+ db.exec('BEGIN IMMEDIATE');try{for(const t of rows){const inserted=db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?)').run(t.id,JSON.stringify(t));if(inserted.changes){enqueue(t);journal('trade-confirmed',t.kind.toUpperCase()+' · block '+t.block,t.hash);}}put('cursor',{number:to,hash:end.hash});const recent=db.prepare('SELECT payload FROM trades ORDER BY rowid DESC LIMIT 3000').all().map(r=>JSON.parse(r.payload));const surge=volumeSurge(recent,head.timestamp*1000);if(surge)enqueue(surge);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+ scan={...scan,completedAt:stamp(),head:top.number,safeHead:head.number,scannedThrough:to,lagBlocks:head.number-to,durationMs:Date.now()-started};
 }
 async function accountedSpend(){
  let prior={};try{prior=JSON.parse(readFileSync(process.env.FAMILY_PRIOR_TX_FILE,'utf8'));}catch{throw Error('PRIOR_SPEND_RECONCILIATION_REQUIRED');}
@@ -71,17 +83,24 @@ async function accountedSpend(){
 }
 async function processEgg(){
  const all=births();let b=all.find(b=>['eligible','awaiting-signature','submitted'].includes(b.status));
- if(!b&&canStartEgg(all,Date.now())){const row=db.prepare("SELECT * FROM triggers WHERE status='queued' ORDER BY rowid LIMIT 1").get();if(!row)return;const e=JSON.parse(row.payload);if(Date.now()-e.timestamp>900000){db.prepare("UPDATE triggers SET status='expired' WHERE id=?").run(row.id);return;}
+ if(!b&&canStartEgg(all,Date.now())){const row=db.prepare("SELECT * FROM triggers WHERE status='queued' ORDER BY rowid LIMIT 1").get();if(!row)return;let e=JSON.parse(row.payload);if(e.kind==='surge'){const source=db.prepare('SELECT payload FROM trades WHERE id=?').get(e.tradeIds?.at(-1));if(!source)throw Error('SURGE_SOURCE_MISSING');const t=JSON.parse(source.payload);e={...e,hash:t.hash,block:t.block,blockHash:t.blockHash,sourceTrade:t};}if(Date.now()-e.timestamp>900000){db.prepare("UPDATE triggers SET status='expired' WHERE id=?").run(row.id);return;}
   if(e.hash&&(await rpc.getBlock(e.block))?.hash!==e.blockHash)throw Error('TRIGGER_REORGANIZED');
-  const readout=await think(e.kind);neural={...readout,asOf:new Date().toISOString()};b=nextEgg({event:e,readout,ordinal:all.length+1});db.exec('BEGIN IMMEDIATE');try{save(b);db.prepare("UPDATE triggers SET status='consumed' WHERE id=?").run(row.id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+  job('assay','Measuring '+e.kind+' input in both founders',e.hash);const readout=await think(e.kind);neural={...readout,asOf:new Date().toISOString()};b=nextEgg({event:e,readout,ordinal:all.length+1});b.event=e;b.sourceToken=chain.token;db.exec('BEGIN IMMEDIATE');try{save(b);db.prepare("UPDATE triggers SET status='consumed' WHERE id=?").run(row.id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
  }
  if(!b)return;
+ processing={stage:b.status,detail:b.name,hash:b.tradeHash,asOf:stamp()};
  try{
-  if(b.status==='submitted'){const verified=await verifyOffspring({birth:b,chain,rpc,owner});if(verified){b={...b,...verified};delete b.preparationError;save(b);if(b.token)await page?.goto(`https://www.ponsfamily.com/launchpad/${b.token}`,{waitUntil:'domcontentloaded'});}return;}
-  if(activeBrowserBirth!==b.id&&page){activeBrowserBirth=b.id;await page.goto('https://www.ponsfamily.com/launchpad/create',{waitUntil:'domcontentloaded'});for(const [selector,value] of [['input[placeholder="Token name"]',b.name],['input[placeholder="symbol"]',b.symbol],['input[placeholder="handle"]','flyfamilyrh']]){try{await page.locator(selector).fill(value,{timeout:2000});}catch{}}try{await page.locator('input[type="file"]').setInputFiles(resolve(root,'assets/flyfamily-logo.jpg'),{timeout:2000});}catch{}}
-  const spent=await accountedSpend(),prepared=await prepareOffspring({birth:b,chain,owner,rpc,spentWei:spent});b={...b,status:'awaiting-signature',prepared};delete b.preparationError;save(b);
-  if(process.argv.includes('--execute')&&process.env.FAMILY_SIGNER_KEY_FILE){
-   const wallet=new Wallet(readFileSync(process.env.FAMILY_SIGNER_KEY_FILE,'utf8').trim());if(wallet.address!==owner)throw Error('WRONG_SIGNER');await accountedSpend();const nonce=await rpc.getTransactionCount(owner,'pending'),{from,...tx}=prepared.tx,raw=await wallet.signTransaction({...tx,nonce}),hash=keccak256(raw);b={...b,status:'submitted',hash,nonce,submittedAt:new Date().toISOString()};writeFileSync(resolve(folder,b.id+'.signed-tx'),raw,{flag:'wx'});save(b);await rpc.broadcastTransaction(raw);
+  if(b.status==='submitted'){const verified=await verifyOffspring({birth:b,chain,rpc,owner});if(verified){journal(verified.status,b.name,b.hash);b={...b,...verified};delete b.preparationError;save(b);if(b.token)await page?.goto(`https://www.ponsfamily.com/launchpad/${b.token}`,{waitUntil:'domcontentloaded'});}return;}
+
+  const spent=await accountedSpend(),prepared=await prepareOffspring({birth:b,chain,owner,rpc,spentWei:spent});if(b.status!=='awaiting-signature')journal('awaiting-signature',b.name,b.tradeHash);b={...b,status:'awaiting-signature',prepared};delete b.preparationError;save(b);
+  if(!b.browserAttemptedAt){
+   bindLiveAllowance(b,owner);
+   const dir=resolve(root,'build/live-pilots',b.id);mkdirSync(dir,{recursive:true});
+   b.browserAttemptedAt=stamp();save(b);writeFileSync(resolve(dir,'pilot.json'),JSON.stringify(b));
+   writeFileSync(resolve(folder,'active-browser.json'),JSON.stringify({id:b.id}));
+   const launch=spawn(process.execPath,[resolve(import.meta.dirname,'live-browser-runner.mjs')],{cwd:root,windowsHide:true,stdio:'ignore',env:{...process.env,FAMILY_PILOT_DIR:dir,FAMILY_LIVE_TEST:'1'}});
+   launch.on('error',()=>{const latest=births().find(x=>x.id===b.id);if(latest&&!latest.hash){latest.preparationError='BROWSER_RUNNER_UNAVAILABLE';save(latest);}});
+   job('browser','Measured cursor operating the PONS launch form',b.tradeHash);
   }
  }catch(e){b.preparationError=/^[A-Z_]+$/.test(e.message)?e.message:'DEPLOYMENT_CHECK_REQUIRED';save(b);}
 }
@@ -93,14 +112,16 @@ try{
  browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1280,height:720}});
  await page.route('**/*',route=>{const req=route.request();if(req.isNavigationRequest()&&req.frame()===page.mainFrame()&&!['www.ponsfamily.com','ponsfamily.com'].includes(new URL(req.url()).hostname))return route.abort();return route.continue();});
  await page.goto(`https://www.ponsfamily.com/launchpad/${chain.token}`,{waitUntil:'domcontentloaded'});
- let chainAt=0,brainAt=0;
- while(running){
-  try{if(readFileSync(resolve(folder,'stop.request'),'utf8').trim()===String(process.pid)){running=false;unlinkSync(resolve(folder,'stop.request'));break;}}catch{}
-  try{jpg=await page.screenshot({type:'jpeg',quality:55});frameAt=new Date().toISOString();cameraError=null;}catch{cameraError='Camera unavailable';}
-  if(Date.now()-chainAt>10000){try{await collect();observerError=null;}catch(e){observerError=/^[A-Z_]+$/.test(e.message)?e.message:'CHAIN_UNAVAILABLE';}chainAt=Date.now();}
-  if(worker&&Date.now()-brainAt>10000){try{neural={...await think(null),asOf:new Date().toISOString()};}catch{cameraError='Neural readout unavailable';}brainAt=Date.now();}
-  if(!observerError)try{await processEgg();}catch(e){observerError=/^[A-Z_]+$/.test(e.message)?e.message:'EGG_PROCESSING_PAUSED';}
-  try{await publish();}catch{console.error('Publication unavailable');}
-  await new Promise(r=>setTimeout(r,1000));
- }
-}finally{worker?.kill();await browser?.close();rpc.destroy();server.close();db.close();closeSync(lock);unlinkSync(lockPath);}
+ stopCapture=await captureBrowser(page,frame=>{jpg=frame;frameAt=stamp();cameraError=null;});
+ let lastShown=births().filter(b=>b.status==='confirmed').at(-1)?.id;
+ const video=videoServer(()=>{const pilot=readPilotView(root);return pilot?.frame?Buffer.from(pilot.frame.split(',')[1],'base64'):jpg;});
+ const lane=(name,interval,task,onError)=>runLane({interval,active:()=>running,task:async()=>{const t=Date.now();await task();loopTimes[name]={durationMs:Date.now()-t,asOf:stamp()};},onError});
+ try{await Promise.all([
+  lane('control',300,async()=>{try{if(readFileSync(resolve(folder,'stop.request'),'utf8').trim()===String(process.pid)){running=false;unlinkSync(resolve(folder,'stop.request'));}}catch{}}),
+  lane('browser',1000,async()=>{const latest=births().filter(b=>b.status==='confirmed'&&b.receiptVerified).at(-1);if(latest&&latest.id!==lastShown){lastShown=latest.id;await page.goto('https://www.ponsfamily.com/launchpad/'+latest.token,{waitUntil:'domcontentloaded'});}},()=>{cameraError='Browser navigation unavailable';}),
+  lane('camera',1000,async()=>{if(!frameAt||Date.now()-Date.parse(frameAt)>900){jpg=await page.screenshot({type:'jpeg',quality:55});frameAt=stamp();}},()=>{cameraError='Camera unavailable';}),
+  lane('chain',3000,async()=>{await collect();observerError=null;},e=>{observerError=/^[A-Z_]+$/.test(e.message)?e.message:'CHAIN_UNAVAILABLE';}),
+  lane('brain',10000,async()=>{if(!worker)startBrain();if(!worker||brainBusy||!jpg)return;brainBusy=true;try{const hasJob=db.prepare("SELECT count(*) n FROM triggers WHERE status='queued'").get().n||births().some(b=>['eligible','awaiting-signature','submitted'].includes(b.status));if(hasJob&&!observerError)await processEgg();else processing=null;if(!neural?.asOf||Date.now()-Date.parse(neural.asOf)>9000)neural={...await think(null),asOf:stamp()};}finally{brainBusy=false;}},e=>{processing={stage:'paused',detail:/^[A-Z_]+$/.test(e.message)?e.message:'MODEL_CHECK_REQUIRED',asOf:stamp()};}),
+  lane('publish',1000,publish,()=>{console.error('Publication unavailable');})
+ ]);}finally{video.close();}
+}finally{await stopCapture?.();worker?.kill();await browser?.close();rpc.destroy();server.close();db.close();closeSync(lock);unlinkSync(lockPath);}

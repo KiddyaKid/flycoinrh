@@ -1,19 +1,21 @@
 // A real PONS form and an upstream neural cursor. No key and no broadcasting.
 import {chromium} from 'playwright';
+import {captureBrowser} from './lib/live-camera.mjs';
+import {moveDecodedCursor} from './lib/cursor-motion.mjs';
 import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';import {spawn} from 'node:child_process';import {createInterface} from 'node:readline';
 import {provider} from './lib/pons.mjs';
-const root=resolve(import.meta.dirname,'..'),dir=resolve(root,'build/external-pilot'),owner='0x9cA6276184A59d23Ef97e1CD06c02C4A6Af3322C';
+const root=resolve(import.meta.dirname,'..'),dir=resolve(process.env.FAMILY_PILOT_DIR??resolve(root,'build/external-pilot')),owner='0x9cA6276184A59d23Ef97e1CD06c02C4A6Af3322C';
 const birth=JSON.parse(readFileSync(resolve(dir,'pilot.json'))),chain=JSON.parse(readFileSync(resolve(import.meta.dirname,'chain.json'))),rpc=provider(chain.rpcUrl);
 if(birth.status!=='awaiting-signature'||birth.hash)throw Error('PILOT_NOT_READY');
-mkdirSync(dir,{recursive:true});let browser,brain,answer,streaming=false,requested=false,x=640,y=500;
+mkdirSync(dir,{recursive:true});let browser,brain,answer,stopCapture,lastJpg=null,streaming=false,requested=false,x=640,y=500;
 const state={status:'opening',asOf:new Date().toISOString(),url:'',log:[],cursor:null,transactionRequested:false,hitCount:0};
 function save(){state.asOf=new Date().toISOString();writeFileSync(resolve(dir,'browser-state.tmp'),JSON.stringify(state));renameSync(resolve(dir,'browser-state.tmp'),resolve(dir,'browser-state.json'));}
 function note(message){state.log.push({time:new Date().toISOString(),message});state.log=state.log.slice(-30);save();console.log(message);}
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 try{
- browser=await chromium.launchPersistentContext(resolve(dir,'browser-profile'),{channel:'chrome',headless:false,viewport:{width:1280,height:720}});const page=await browser.newPage();
+ browser=await chromium.launchPersistentContext(resolve(root,'build/external-pilot/browser-profile'),{channel:'chrome',headless:true,viewport:{width:1280,height:720}});const page=await browser.newPage();
  page.on('popup',p=>p.close());page.on('download',d=>d.cancel());
  page.on('pageerror',e=>note('Page error: '+e.message.slice(0,300)));
  const reads=new Set(['eth_call','eth_getBalance','eth_getCode','eth_blockNumber','eth_getBlockByNumber','eth_getTransactionReceipt','eth_getTransactionByHash','eth_getTransactionCount','eth_estimateGas','eth_gasPrice','eth_maxPriorityFeePerGas','eth_feeHistory']);
@@ -37,7 +39,8 @@ try{
   const announce=()=>window.dispatchEvent(new CustomEvent('eip6963:announceProvider',{detail:{info:{uuid:'c9f991aa-489b-4f80-b9ee-1949d88061dd',name:'FLYFAMILY Test',rdns:'live.flyfamily',icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'},provider:p}}));window.addEventListener('eip6963:requestProvider',announce);announce();
  },{owner});
  await page.goto('https://www.ponsfamily.com/launchpad/create',{waitUntil:'domcontentloaded'});state.url=page.url();
- streaming=true;const stream=(async()=>{while(streaming){try{const jpg=await page.screenshot({type:'jpeg',quality:55});writeFileSync(resolve(dir,'browser-frame.tmp'),jpg);renameSync(resolve(dir,'browser-frame.tmp'),resolve(dir,'browser-frame.jpg'));save();}catch{}await wait(500);}})();
+ stopCapture=await captureBrowser(page,jpg=>{lastJpg=jpg;writeFileSync(resolve(dir,'browser-frame.tmp'),jpg);renameSync(resolve(dir,'browser-frame.tmp'),resolve(dir,'browser-frame.jpg'));});
+ streaming=true;const stream=(async()=>{while(streaming){try{const jpg=lastJpg??await page.screenshot({type:'jpeg',quality:55});writeFileSync(resolve(dir,'browser-frame.tmp'),jpg);renameSync(resolve(dir,'browser-frame.tmp'),resolve(dir,'browser-frame.jpg'));save();}catch{}await wait(500);}})();
  await page.getByRole('textbox',{name:'Name',exact:true}).waitFor({timeout:30000});
  note('Real PONS form open. Wallet exposes only the test address and read-only RPC.');
  // The operator handles personal terms / jurisdiction attestations in this window.
@@ -65,12 +68,12 @@ try{
  state.status='neural-cursor';
  for(let i=0;i<120&&!requested;i++){
   await page.locator('#family-cursor').evaluate((e,p)=>{e.style.left=p.x+'px';e.style.top=p.y+'px';},{x,y});
-  const frame=resolve(dir,'cursor-input.jpg');await page.screenshot({path:frame,type:'jpeg',quality:65});
+  const frame=resolve(dir,'cursor-input.jpg');if(lastJpg)writeFileSync(frame,lastJpg);else await page.screenshot({path:frame,type:'jpeg',quality:65});const stepStarted=Date.now();
   const r=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('CURSOR_TIMEOUT')),90000);answer={resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}};brain.stdin.write(JSON.stringify({id:String(i),frame,x,y,seed:17+i,gain:1})+'\n');});
   const b=await launch.boundingBox();if(!b||!await launch.isEnabled())throw Error('LAUNCH_CONTROL_CHANGED');
-  x=Math.max(b.x+4,Math.min(b.x+b.width-4,x+r.dx));y=Math.max(b.y+4,Math.min(b.y+b.height-4,y+r.dy));await page.mouse.move(x,y);
+  const from={x,y};x=Math.max(b.x+4,Math.min(b.x+b.width-4,x+r.dx));y=Math.max(b.y+4,Math.min(b.y+b.height-4,y+r.dy));await moveDecodedCursor(page,from,{x,y});
   const hit=Boolean(r.click);
-  state.cursor={...r,x,y,hit,step:i,assistance:'DOM target selection and boundary clamp; neural displacement and stop gate'};save();writeFileSync(resolve(dir,'cursor-steps.jsonl'),JSON.stringify(state.cursor)+'\n',{flag:'a'});
+  state.cursor={...r,x,y,hit,computeMs:Date.now()-stepStarted,step:i,assistance:'DOM target selection and boundary clamp; neural displacement and stop gate'};save();writeFileSync(resolve(dir,'cursor-steps.jsonl'),JSON.stringify(state.cursor)+'\n',{flag:'a'});
   if(hit){
    state.hitCount++;note('Neural cursor hit the enabled '+(state.confirming?'confirmation':'launch')+' button; sending a real mouse click.');await page.mouse.click(x,y);await wait(3000);
    const body=await page.locator('body').innerText();writeFileSync(resolve(dir,'after-click.txt'),body);
@@ -87,6 +90,6 @@ try{
  if(requested){for(let n=0;n<600&&state.status==='awaiting-local-signature';n++)await wait(1000);}
  await wait(30000);streaming=false;await stream;
 }catch(e){state.status='paused';note('Browser pilot paused: '+e.message.slice(0,500));}
-finally{streaming=false;brain?.kill();await browser?.close();rpc.destroy();}
+finally{streaming=false;await stopCapture?.();brain?.kill();await browser?.close();rpc.destroy();}
 
 
