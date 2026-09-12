@@ -13,6 +13,7 @@ from flysim import FlyBrain
 from flyeye import FlyEye
 import pandas as pd
 from telemetry import soma_sample, activity_frames
+from vision_record import record_vision
 
 graph=Path(os.environ['FAMILY_GRAPH'])
 graph_hash=hashlib.file_digest(graph.open('rb'),'sha256').hexdigest()
@@ -35,7 +36,10 @@ probes=np.array([probe_groups[name][0] for name in probe_names])
 for line in sys.stdin:
  try:
   command=json.loads(line);img=np.asarray(Image.open(command['frame']).convert('L'),dtype=np.float32)/255
-  drive=eye.look(img,640,360);kind=command.get('kind');parents=[]
+  context=command.get('observation') or {}
+  cx=float(np.clip(context.get('x',640),150,img.shape[1]-150));cy=float(np.clip(context.get('y',360),105,img.shape[0]-105))
+  drive=eye.look(img,cx,cy);kind=command.get('kind');parents=[]
+  vision=record_vision(img,eye,drive,cx,cy,context)
   baseline_drive=drive.copy()
   if kind in inputs:drive[tuple(inputs[kind])]=100.
   for ident,seed in [('adam',17),('atom',29)]:
@@ -49,5 +53,5 @@ for line in sys.stdin:
     parent['delta']=dict(active=parent['active']-parent['baseline']['active'],rates={k:parent['rates'][k]-parent['baseline']['rates'][k] for k in groups})
    parents.append(parent)
   stimulus=dict(region={'buy':'vpoEN','sell':'vpoIN','surge':'vpoEN + vpoIN'}.get(kind,'L1 / L2'),cells=len(inputs[kind]) if kind in inputs else len(eye.on_idx)+len(eye.off_idx),rateHz=100 if kind in inputs else None,encoding='Engineered input; same image and seed control' if command.get('matched') else 'Browser luminance')
-  print(json.dumps(dict(id=command['id'],neurons=fb.n,graphSha256=graph_hash,windowMs=40,gain=.3,kind=kind or 'vision',stimulus=stimulus,parents=parents,modelScope='independent seeded trials; no learned memory',modelSource='fruitflydev/flycoinrh/flysim.py')),flush=True)
+  print(json.dumps(dict(id=command['id'],neurons=fb.n,graphSha256=graph_hash,windowMs=40,gain=.3,kind=kind or 'vision',stimulus=stimulus,vision=vision,parents=parents,modelScope='independent seeded trials; no learned memory',modelSource='fruitflydev/flycoinrh/flysim.py')),flush=True)
  except Exception as exc:print(json.dumps(dict(error=type(exc).__name__)),flush=True)

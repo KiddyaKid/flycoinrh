@@ -1,3 +1,4 @@
+import {visualReference,compactDossier} from './field-payload.mjs';
 // Every swap gets a durable disposition. Measurement capacity never invents a response.
 export function dossierStore(db){
  db.exec('CREATE TABLE IF NOT EXISTS dossiers(id TEXT PRIMARY KEY,status TEXT NOT NULL,payload TEXT NOT NULL)');
@@ -11,10 +12,10 @@ export function dossierStore(db){
     put(row.id,'measuring',data);return data.trade;
    }return null;
   },
-  complete(trade,readout){const {parents,...meta}=readout;put(trade.id,'measured',{trade,measuredAt:readout.asOf,...meta,parents:parents.map(({telemetry,...p})=>p),control:'Same browser image, seed, gain and 40 ms; market input removed'});},
+  complete(trade,readout){const {parents,vision,...meta}=readout;put(trade.id,'measured',{trade,measuredAt:readout.asOf,...meta,vision:visualReference(vision),parents:parents.map(({telemetry,...p})=>p),control:'Same browser image, seed, gain and 40 ms; market input removed'});},
   fail(trade){put(trade.id,'failed',{trade,reason:'Measurement interrupted; no completed response'});},
-  get(id){const row=db.prepare('SELECT status,payload FROM dossiers WHERE id=?').get(id);return row?{...JSON.parse(row.payload),status:row.status}:null;},
-  recent(){return db.prepare("SELECT payload FROM dossiers WHERE status='measured' ORDER BY rowid DESC LIMIT 8").all().map(r=>({...JSON.parse(r.payload),status:'measured'}));},
+  get(id){const row=db.prepare('SELECT status,payload FROM dossiers WHERE id=?').get(id);return row?compactDossier({...JSON.parse(row.payload),status:row.status}):null;},
+  recent(){return db.prepare("SELECT payload FROM dossiers WHERE status='measured' ORDER BY rowid DESC LIMIT 8").all().map(r=>compactDossier({...JSON.parse(r.payload),status:'measured'}));},
   counts(){return Object.fromEntries(db.prepare('SELECT status,count(*) n FROM dossiers GROUP BY status').all().map(r=>[r.status,r.n]));}
  };
 }
