@@ -8,6 +8,7 @@ import {reconcileWalletSpend} from './lib/wallet-spend.mjs';
 import {launchStatus,readSession,checkSessionBirth} from './lib/launch-session.mjs';
 import {localKey} from './lib/local-key.mjs';
 import {rawLogoCid} from './lib/logo-attestation.mjs';
+import {writeAtomicRecord} from './lib/atomic-record.mjs';
 const reprice=process.argv.includes('--reprice');
 const automatic=process.argv.includes('--auto'),execute=automatic||process.argv.includes('--execute');if(process.argv.slice(2).some(a=>!['--execute','--auto','--reprice'].includes(a)))throw Error('UNKNOWN_ARGUMENT');
 if(execute&&!automatic&&(!process.stdin.isTTY||!process.stdout.isTTY))throw Error('INTERACTIVE_TERMINAL_REQUIRED');
@@ -15,7 +16,7 @@ const root=resolve(import.meta.dirname,'..'),dir=resolve(process.env.FAMILY_PILO
 const dbFile=resolve(process.env.FAMILY_STATE_DIR??resolve(root,'build/family'),'ledger.sqlite'),rawFile=resolve(dir,'browser-signed-tx'),lockFile=resolve(dir,'browser-sign.lock'),lock=openSync(lockFile,'wx');let birth=JSON.parse(readFileSync(file));
 writeFileSync(lock,String(process.pid));
 function fresh(){const age=Date.now()-Date.parse(request.requestedAt);if(!Number.isFinite(age)||age<0||age>600000)throw Error('BROWSER_REQUEST_EXPIRED');}
-function save(){writeFileSync(file+'.tmp',JSON.stringify(birth,(_,v)=>typeof v==='bigint'?String(v):v,2));renameSync(file+'.tmp',file);if(process.env.FAMILY_LIVE_TEST==='1'){const d=new DatabaseSync(dbFile);try{d.prepare('UPDATE births SET payload=? WHERE id=?').run(JSON.stringify(birth),birth.id);}finally{d.close();}}}
+function save(){writeAtomicRecord(file,birth);if(process.env.FAMILY_LIVE_TEST==='1'){const d=new DatabaseSync(dbFile);try{d.prepare('UPDATE births SET payload=? WHERE id=?').run(JSON.stringify(birth),birth.id);}finally{d.close();}}}
 function result(){writeFileSync(resolve(dir,'browser-result.json'),JSON.stringify({birthId:birth.id,digest:request.digest,hash:birth.hash}));}
 async function spent(excludeCurrent=false){
  const prior=JSON.parse(readFileSync(process.env.FAMILY_PRIOR_TX_FILE)),db=new DatabaseSync(dbFile,{readOnly:true});let rows;try{rows=db.prepare('SELECT payload FROM births').all().map(r=>JSON.parse(r.payload));}finally{db.close();}

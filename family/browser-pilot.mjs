@@ -2,6 +2,7 @@
 import {chromium} from 'playwright';
 import {captureBrowser} from './lib/live-camera.mjs';
 import {moveDecodedCursor} from './lib/cursor-motion.mjs';
+import {installPageWalletChannel} from './lib/page-wallet-channel.mjs';
 import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';import {spawn} from 'node:child_process';import {createInterface} from 'node:readline';
@@ -20,7 +21,7 @@ try{
  page.on('popup',p=>p.close());page.on('download',d=>d.cancel());
  page.on('pageerror',e=>note('Page error: '+e.message.slice(0,300)));
  const reads=new Set(['eth_call','eth_getBalance','eth_getCode','eth_blockNumber','eth_getBlockByNumber','eth_getTransactionReceipt','eth_getTransactionByHash','eth_getTransactionCount','eth_estimateGas','eth_gasPrice','eth_maxPriorityFeePerGas','eth_feeHistory']);
- await page.exposeBinding('__familyRPC',async({frame},method,params=[])=>{
+ await installPageWalletChannel(page,async({frame},method,params=[])=>{
   if(new URL(frame.url()).origin!=='https://www.ponsfamily.com')throw Error('ORIGIN_DENIED');
   if(method==='eth_sendTransaction'){
    if(requested)throw Error('ONE_REQUEST_ONLY');requested=true;
