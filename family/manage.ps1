@@ -45,6 +45,9 @@ if ($Action -eq 'Start' -and -not $workerProcess) {
   $nodePath = (Get-Command node -ErrorAction Stop).Source
   $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   $started = Start-Process -FilePath $nodePath -ArgumentList @(('"' + $serverFile + '"')) -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $stateDir "worker-$stamp.out.log") -RedirectStandardError (Join-Path $stateDir "worker-$stamp.err.log")
+  $awakeScript = Join-Path $PSScriptRoot 'keep-awake.ps1'
+  $awakeStatus = Join-Path $stateDir "awake-$($started.Id)-$stamp.json"
+  Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile','-File',('"'+$awakeScript+'"'),'-WorkerId',$started.Id,'-StatusFile',('"'+$awakeStatus+'"')) -WindowStyle Hidden -RedirectStandardError (Join-Path $stateDir "awake-$stamp.err.log") | Out-Null
   Write-Output "Started worker PID $($started.Id), preparation only. Check Status after the graph loads."
   exit 0
 }
