@@ -85,7 +85,7 @@ class FlyBrain:
 
     # ---- simulation ------------------------------------------------------
 
-    def run(self, drive, steps, gains=None, record=None, seed=0, spike_log=False):
+    def run(self, drive, steps, gains=None, record=None, seed=0, spike_log=False, probes=None, sample_every=10):
         """
         drive     : dict {neuron_index_array: rate_hz} external Poisson input
         steps     : number of dt steps
@@ -136,6 +136,7 @@ class FlyBrain:
         # rather than a rate averaged over everything
         ever = np.zeros(n, dtype=bool)
         log = [] if spike_log else None
+        probe_log = []
 
         indptr, indices, wdata = self.indptr, self.indices, self.wdata
         thresh, rest, reset, decay = p.v_thresh, p.v_rest, p.v_reset, self.decay
@@ -177,6 +178,8 @@ class FlyBrain:
                     counts[name] += np.isin(sel, fired)
 
             refr -= 1
+            if probes is not None and (_ + 1) % sample_every == 0:
+                probe_log.append(v[probes].astype(float).tolist())
 
         secs = steps * p.dt / 1000.0
         out = {k: c / secs for k, c in counts.items()}
@@ -186,4 +189,6 @@ class FlyBrain:
         out["_mean_mv"] = float(v.mean())
         if spike_log:
             out["_spikes"] = log
+        if probes is not None:
+            out["_probe_mv"] = probe_log
         return out
