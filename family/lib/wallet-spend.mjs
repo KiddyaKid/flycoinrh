@@ -9,7 +9,7 @@ export async function reconcileWalletSpend({rpc,owner,hashes,session=process.env
   const anchor=a.receipts.reduce((p,r)=>r.block>p.block?r:p);
   if((await rpc.getBlock(anchor.block))?.hash!==anchor.blockHash)throw Error('SESSION_BASELINE_REORGANIZED');
  }
- for(const hash of new Set(hashes.filter(Boolean))){
+ for(const hash of new Set([...hashes,...(a?.reconciledManualHashes??[])].filter(Boolean))){
   if(baseline.has(hash.toLowerCase()))continue;
   const [r,t]=await Promise.all([rpc.getTransactionReceipt(hash),rpc.getTransaction(hash)]);
   if(!r||!t||t.from!==owner||(await rpc.getBlock(r.blockNumber))?.hash!==r.blockHash||t.nonce<(a?.baselineNonce??0)||nonces.has(t.nonce))throw Error('UNRESOLVED_WALLET_TX');

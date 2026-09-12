@@ -21,3 +21,11 @@ test('multiple fresh births share one cumulative cap; failed gas and replacement
  assert.throws(()=>sessionCost(a,parseEther('0.279'),parseEther('0.002')),/TOTAL_BUDGET/);
  assert.equal(sessionCost(a,parseEther('0.279'),parseEther('0.001')).usedWei,String(parseEther('0.199')));
 });
+
+test('CA cutover rejects pre-cutover inputs without resetting the spending baseline',()=>{
+ const switched={...a,sourceChangedAt:new Date(now-100).toISOString()};
+ assert.throws(()=>checkSessionBirth(switched,{...birth,event:{...birth.event,timestamp:now-500}},a.owner),/MISMATCH/);
+ checkSessionBirth(switched,birth,a.owner);
+ assert.equal(sessionCost(switched,parseEther('0.18'),0n).remainingWei,String(parseEther('0.1')));
+ assert.throws(()=>validateSession({...a,reconciledManualHashes:['bad']},a.id,now),/MANUAL_RECEIPTS/);
+});

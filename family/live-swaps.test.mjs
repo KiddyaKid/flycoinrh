@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Interface,keccak256} from 'ethers';
 import {collectLiveSwaps} from './lib/live-swaps.mjs';
 import {poolIdentity,SWAP_ABI} from './lib/v4-input.mjs';
+import {CURVE_ABI} from './lib/pons.mjs';
 const hash=n=>'0x'+n.toString(16).padStart(64,'0'),address=n=>'0x'+n.toString(16).padStart(40,'0');
 const abi=new Interface(SWAP_ABI),token=address(2),manager=address(9);
 function fixture({badReceipt=false}={}){
@@ -21,4 +22,17 @@ test('a saved cursor marks newly confirmed swaps as live',async()=>{
 });
 test('a log absent from its receipt never advances the durable cursor',async()=>{
  let committed=false;await assert.rejects(()=>collectLiveSwaps({...fixture({badReceipt:true}),getCursor:()=>null,commit:()=>{committed=true;}}),/UNVERIFIED_TRADE/);assert.equal(committed,false);
+});
+
+test('official curve buys and sells share the cursor with graduation swaps',async()=>{
+ const f=fixture(),curve=address(12),ca=new Interface(CURVE_ABI),v4=await f.rpc.getLogs();
+ const curveLogs=['CurveBuy','CurveSell'].map((name,i)=>({address:curve,transactionHash:hash(778+i),index:4+i,blockNumber:1199,blockHash:hash(1199),...ca.encodeEventLog(ca.getEvent(name),[address(3),address(3),100n,200n,1n,0n])}));
+ const all=[...v4,...curveLogs];f.config={...f.config,curve,curveCodeHash:keccak256('0x1234'),tokenCodeHash:keccak256('0x1234'),quoteSymbol:'GOOGL',quoteDecimals:18};
+ f.rpc.getLogs=async filter=>filter.address===curve?curveLogs:v4;
+ f.rpc.getTransactionReceipt=async()=>({status:1,blockHash:hash(1199),logs:all});
+ let rows;const result=await collectLiveSwaps({...f,getCursor:()=>({number:1198,hash:hash(1198)}),commit:r=>rows=r});
+ assert.equal(rows.length,4);assert.equal(result.adapter,'pons-curve-and-v4');
+ assert.deepEqual(rows.slice(2).map(r=>[r.kind,r.quoteWei,r.quoteSymbol]),[['buy','100','GOOGL'],['sell','200','GOOGL']]);
+ assert.ok(rows.every(r=>!r.historical&&!r.external&&r.sourceToken===token));
+ f.config.curveCodeHash=hash(1);await assert.rejects(()=>collectLiveSwaps({...f,getCursor:()=>null,commit:()=>assert.fail('must not commit')}),/INPUT_CODE_CHANGED/);
 });
