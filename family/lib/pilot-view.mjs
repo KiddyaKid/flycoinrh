@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';import {resolve} from 'node:path';
 import {publicBirth,tradeIdentity} from '../policy.mjs';
 let cachedAt=0,cached=null;
-export function readPilotView(root,now=Date.now()){if(now-cachedAt<100)return cached;cachedAt=now;cached=load(root,now);return cached;}
+export function readPilotView(root,now=Date.now()){if(now-cachedAt<40)return cached;cachedAt=now;cached=load(root,now);return cached;}
 function load(root,now){
  try{
   let dir=resolve(root,'build/external-pilot');try{const a=JSON.parse(readFileSync(resolve(root,'build/family/active-browser.json')));if(/^[a-f0-9]{64}$/.test(a.id))dir=resolve(root,'build/live-pilots',a.id);}catch{}const s=JSON.parse(readFileSync(resolve(dir,'browser-state.json'))),b=JSON.parse(readFileSync(resolve(dir,'pilot.json')));

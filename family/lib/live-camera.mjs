@@ -7,7 +7,7 @@ export function videoServer(getFrame,port=5191){
  const timer=setInterval(()=>{const frame=getFrame();if(!frame||frame===last)return;last=frame;
   const packet=Buffer.concat([Buffer.from('--familyframe\r\nContent-Type: image/jpeg\r\nContent-Length: '+frame.length+'\r\n\r\n'),frame,Buffer.from('\r\n')]);frames++;
   for(const res of clients){if(res.writableLength>131072)continue;res.write(packet);bytes+=packet.length;}
- },80);
+ },40);
  const server=createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store, no-transform');
   res.setHeader('Access-Control-Allow-Origin','*');
@@ -26,6 +26,6 @@ export async function captureBrowser(page,onFrame){
   onFrame(Buffer.from(event.data,'base64'));
   void session.send('Page.screencastFrameAck',{sessionId:event.sessionId}).catch(()=>{});
  });
- await session.send('Page.startScreencast',{format:'jpeg',quality:42,maxWidth:1120,maxHeight:630,everyNthFrame:2});
+ await session.send('Page.startScreencast',{format:'jpeg',quality:45,maxWidth:1280,maxHeight:720,everyNthFrame:1});
  return async()=>{await session.send('Page.stopScreencast').catch(()=>{});await session.detach().catch(()=>{});};
 }
