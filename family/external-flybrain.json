@@ -1,0 +1,26 @@
+{
+  "chainId": 4663,
+  "token": "0x4Eb990547BCe4a982432CA88Cf5fae7EED1A2d35",
+  "factory": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+  "manager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+  "hook": "0xE5e702641Ea86F4ae6cC3cDaeD2B886f976Be044",
+  "quote": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+  "token0": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+  "token1": "0x4Eb990547BCe4a982432CA88Cf5fae7EED1A2d35",
+  "poolId": "0x6f638b29e275cab8f584df0a4c6a045922217aed8747f2459eedb034abb31ac7",
+  "fee": 0,
+  "tickSpacing": 200,
+  "quoteSymbol": "GOOGL",
+  "quoteDecimals": 18,
+  "verifiedBlock": 60786793,
+  "tokenCodeHash": "0x20d2028cc7d444d6b81185e3ef97776c5e5f76ccc29360c086fa2a893880ceb0",
+  "factoryCodeHash": "0x89a27da6f703e0a7cdd4f233e7cb57604ff75b164530962d3ff7cf8483a67d84",
+  "managerCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626",
+  "hookCodeHash": "0xc21b1e6c1b45403e81a581f22ed6d9c747997af1cfdac1b1dc9f4b1d346a10db",
+  "quoteCodeHash": "0x6c1fdd40002dcb440c7fff6a84171404d279ccb057803b65826f7546acd65630",
+  "sample": {
+    "hash": "0x33c592fce3aebbb43f54fc71302950a27e65ae98510e3c36ed36ad6881068a74",
+    "index": 42,
+    "block": 60786685
+  }
+}

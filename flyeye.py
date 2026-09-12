@@ -89,14 +89,15 @@ class FlyPilot:
     affordable to simulate.
     """
 
-    def __init__(self, fb, eye=None, sim_steps=100, click_hz=330.0):
+    def __init__(self, fb, eye=None, sim_steps=100, click_hz=330.0,
+                 annotations_path="data/body-annotations.feather"):
         self.fb = fb
         self.eye = eye or FlyEye(fb)
         self.sim_steps = sim_steps
         self.click_hz = click_hz
 
         import pandas as pd
-        a = pd.read_feather("data/body-annotations.feather")
+        a = pd.read_feather(annotations_path)
         a = a.drop_duplicates("bodyId").set_index("bodyId")
         side = a["somaSide"].reindex(fb.bodies).fillna("").to_numpy().astype(str)
 

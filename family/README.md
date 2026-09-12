@@ -31,3 +31,11 @@ Ambient courtship is illustrative and may run when no trade exists. Actual eggs 
 The frontend shows the latest 100 family records and 30 trades; SQLite retains full history. Only founder-token trades are indexed in this version. Child tokens do not automatically become parents or sources of new trade stimuli. There is no guarantee of demand or liquidity. Runtime needs a persistent computer/container with Chromium, Python, graph data and disk; Vercel hosts the frontend, not this long-running process.
 
 Run `npm test`. `node rehearse.mjs` exercises all three inputs and read-only PONS preparation without publishing a birth or signing. Full genuine launch is not considered tested until a real confirmed receipt is obtained under the operator budget.
+
+## External FLYBRAIN pilot (in progress)
+
+`external-flybrain.json` pins the requested token's graduated Uniswap V4 PoolId, factory, hook, manager and GOOGL quote asset. `inspect-v4.mjs` selects a recent confirmed swap. `lib/v4-input.mjs` checks the canonical receipt, deployed code and factory registration; V4 positive target delta is a buy. External replays are labelled as tests and excluded from the founder's live volume baseline.
+
+`pilot.mjs` prepares one deterministic test child from a measured two-seed assay and simulates deployment under the cumulative 0.02 ETH ceiling. Its direct `--execute` path is disabled: the requested execution must come from the actual PONS page. `browser-pilot.mjs` opens a dedicated local Chrome profile, fills the fixed metadata as host assistance, then applies the upstream FlyPilot cursor decoder. Its wallet is read-only: a page transaction request is captured, never signed or broadcast. Personal terms must be accepted by the operator. There is no fallback click if the neural cursor misses.
+
+`cursor.py` uses the upstream untrained gain of 1.0; it also accepts 0.3 for an explicit comparison. The measured naming assay retains gain 0.3. These are separate parameterised trials, neither a calibrated brain nor learned language. The host initially positions the cursor below the launch button; subsequent displacement and click output are recorded in `build/external-pilot/cursor-steps.jsonl`. This prototype is not yet a completed page-to-chain launch. Browser wallet request validation and local signing remain pending until the real form produces a request.

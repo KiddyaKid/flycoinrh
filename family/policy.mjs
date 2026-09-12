@@ -11,6 +11,8 @@ export function tradeIdentity(t){
 }
 // A surge is an additional, once-per-minute event. Its baseline excludes the current bucket.
 export function volumeSurge(trades,now){
+ // External pilot replays cannot enter the live founder's ETH volume baseline.
+ trades=trades.filter(t=>!t.test&&!t.historical&&(!t.quoteSymbol||t.quoteSymbol==='ETH'));
  const bucket=Math.floor(now/60000),start=bucket*60000;
  const prior=trades.filter(t=>t.timestamp>=start-300000&&t.timestamp<start);
  const recent=trades.filter(t=>t.timestamp>=start&&t.timestamp<=now);
@@ -31,4 +33,4 @@ export function nextEgg({event,readout,parents=['adam','atom'],ordinal=1}){
  return {id,status:'eligible',createdAt:new Date().toISOString(),triggerId:identity,triggerKind:event.kind,tradeHash:event.hash??null,parents,generation:1,ordinal,naming,name:`${naming.name} #${ordinal}`,symbol:`${naming.symbol.slice(0,7)}${ordinal}`,genome:{sourceGraphSha256:readout.graphSha256,seed:parseInt(naming.fingerprint.slice(0,8),16),parameters:'Same MaleCNS anatomy and reference parameters; new stochastic seed',mutationCount:0},assaySha256:digest(readout),ruleVersion:VERSION};
 }
 export function canStartEgg(births,now){return !births.some(b=>['eligible','awaiting-signature','submitted'].includes(b.status))&&(!births.length||now-Date.parse(births.at(-1).createdAt)>=COOLDOWN_MS);}
-export function publicBirth(b){const {id,status,createdAt,confirmedAt,triggerKind,tradeHash,parents,generation,ordinal,name,symbol,genome,naming,hash,token,receiptVerified,preparationError}=b;return {id,status,createdAt,confirmedAt,triggerKind,tradeHash,parents,generation,ordinal,name,symbol,genome,naming,hash,token,receiptVerified,preparationError};}
+export function publicBirth(b){const {id,status,createdAt,confirmedAt,triggerKind,tradeHash,parents,generation,ordinal,name,symbol,genome,naming,hash,token,receiptVerified,preparationError,test,inputMode,sourceToken}=b;return {id,status,createdAt,confirmedAt,triggerKind,tradeHash,parents,generation,ordinal,name,symbol,genome,naming,hash,token,receiptVerified,preparationError,test,inputMode,sourceToken};}
