@@ -8,6 +8,7 @@ import {resolve} from 'node:path';import {spawn} from 'node:child_process';impor
 import {provider} from './lib/pons.mjs';
 const root=resolve(import.meta.dirname,'..'),dir=resolve(process.env.FAMILY_PILOT_DIR??resolve(root,'build/external-pilot')),owner='0x9cA6276184A59d23Ef97e1CD06c02C4A6Af3322C';
 const birth=JSON.parse(readFileSync(resolve(dir,'pilot.json'))),chain=JSON.parse(readFileSync(resolve(import.meta.dirname,'chain.json'))),rpc=provider(chain.rpcUrl);
+const rehearse=process.env.FAMILY_REHEARSAL==='1';
 if(birth.status!=='awaiting-signature'||birth.hash)throw Error('PILOT_NOT_READY');
 mkdirSync(dir,{recursive:true});let browser,pilotPage,sharedBrowser=false,brain,answer,stopCapture,lastJpg=null,streaming=false,requested=false,x=640,y=500;
 const state={status:'opening',asOf:new Date().toISOString(),url:'',log:[],cursor:null,transactionRequested:false,hitCount:0};
@@ -24,7 +25,8 @@ try{
   if(method==='eth_sendTransaction'){
    if(requested)throw Error('ONE_REQUEST_ONLY');requested=true;
    const request={birthId:birth.id,requestedAt:new Date().toISOString(),source:'pons-page-eth_sendTransaction',url:frame.url(),tx:params[0],cursor:state.cursor};request.digest=createHash('sha256').update(JSON.stringify(request.tx)).digest('hex');
-   writeFileSync(resolve(dir,'browser-request.json'),JSON.stringify(request,null,2));
+   writeFileSync(resolve(dir,rehearse?'rehearsal-request.json':'browser-request.json'),JSON.stringify(request,null,2));
+   if(rehearse){state.transactionRequested=true;state.status='rehearsal-complete';note('Verified actual PONS wallet request. Unsigned rehearsal; no transaction broadcast.');throw Object.assign(Error('Unsigned rehearsal complete'),{code:4001});}
    state.transactionRequested=true;state.status='awaiting-local-signature';note('PONS page requested a transaction. Waiting for the separate local wallet; the browser has no key.');
    for(let n=0;n<600;n++){const file=resolve(dir,'browser-result.json');if(existsSync(file)){const result=JSON.parse(readFileSync(file));if(result.digest===request.digest&&result.birthId===birth.id&&/^0x[a-fA-F0-9]{64}$/.test(result.hash)){state.status='submitted';state.hash=result.hash;save();return result.hash;}}await wait(1000);}throw Error('LOCAL_SIGNATURE_TIMEOUT');
   }

@@ -10,7 +10,7 @@ export async function prepareOffspring({birth,chain,owner,rpc,spentWei}){
  const {name,symbol}=birth;if(!name||!symbol||!birth.naming?.fingerprint)throw Error('MEASURED_NAME_REQUIRED');
  const params={name,symbol,logo:'https://flyfamily.live/flyfamily-logo.jpg',description:`Digital offspring of ADAM and ATOM. Birth ${birth.id}. Uncalibrated MaleCNS model; not biological mating.`,socials:{twitter:'https://x.com/flyfamilyrh',telegram:'',discord:'',website:'https://flyfamily.live/',farcaster:''},creatorFeeRecipient:getAddress(owner),creatorTaxBps:CHILD_CREATOR_TAX_BPS,buybackEnabled:false,expectedEconomics:economics,salt:'0x'+birth.id};
  const tx={chainId:chain.chainId,from:getAddress(owner),to:chain.factory,value:fee,data:new Interface(FACTORY_ABI).encodeFunctionData('launchToken',[params,configId,ZeroAddress])};
- await rpc.call(tx);const estimate=await rpc.estimateGas(tx),fees=await rpc.getFeeData();const gasPrice=fees.gasPrice;if(!gasPrice)throw Error('GAS_UNAVAILABLE');const gasLimit=estimate*120n/100n,maximum=fee+gasLimit*gasPrice;
+ await rpc.call(tx);const estimate=await rpc.estimateGas(tx),fees=await rpc.getFeeData();const gasPrice=(fees.gasPrice??0n)*2n;if(!gasPrice)throw Error('GAS_UNAVAILABLE');const gasLimit=estimate*120n/100n,maximum=fee+gasLimit*gasPrice;
  if(BigInt(spentWei)+maximum>parseEther(TOTAL_BUDGET_ETH))throw Error('TOTAL_BUDGET_EXCEEDED');
  return {tx:{...tx,gasLimit:gasLimit.toString(),gasPrice:gasPrice.toString(),value:fee.toString()},params,maximumWei:maximum.toString(),preparedAt:new Date().toISOString()};
 }

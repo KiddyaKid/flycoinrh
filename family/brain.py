@@ -36,11 +36,18 @@ for line in sys.stdin:
  try:
   command=json.loads(line);img=np.asarray(Image.open(command['frame']).convert('L'),dtype=np.float32)/255
   drive=eye.look(img,640,360);kind=command.get('kind');parents=[]
+  baseline_drive=drive.copy()
   if kind in inputs:drive[tuple(inputs[kind])]=100.
   for ident,seed in [('adam',17),('atom',29)]:
    r=fb.run(drive,steps=200,gains=gains,record={**groups,**extra},seed=seed,spike_log=True,probes=probes)
    frames,spikes=activity_frames(r['_spikes'],sample_indices)
    telemetry=dict(sampleCount=len(sample_indices),mappedCells=mapped,binMs=2,frames=frames,spikes=spikes,totalSpikes=sum(spikes),probeLabels=[dict(name=name,bodyId=int(fb.bodies[idx])) for name,idx in zip(probe_names,probes)],probeMv=np.round(r['_probe_mv'],3).tolist(),thresholdMv=fb.p.v_thresh,rates={k:float(r[k].mean()) if len(r[k]) else None for k in extra},learning=dict(enabled=False,updates=0,state='Independent trials reset; no learning job'),retina=dict(inputOnHz=float(np.mean(drive[tuple(eye.on_idx)])),inputOffHz=float(np.mean(drive[tuple(eye.off_idx)])),cellsOn=len(eye.on_idx),cellsOff=len(eye.off_idx)))
-   parents.append(dict(id=ident,seed=seed,active=int(len(r['_fired'])),meanMv=float(r['_mean_mv']),rates={k:float(r[k].mean()) for k in groups},telemetry=telemetry))
-  print(json.dumps(dict(id=command['id'],neurons=fb.n,graphSha256=graph_hash,windowMs=40,gain=.3,kind=kind or 'vision',parents=parents,modelScope='independent seeded trials; no learned memory',modelSource='fruitflydev/flycoinrh/flysim.py')),flush=True)
+   parent=dict(id=ident,seed=seed,active=int(len(r['_fired'])),meanMv=float(r['_mean_mv']),rates={k:float(r[k].mean()) for k in groups},telemetry=telemetry)
+   if command.get('matched') and kind in inputs:
+    control=fb.run(baseline_drive,steps=200,gains=gains,record=groups,seed=seed,spike_log=True)
+    parent['baseline']=dict(active=int(len(control['_fired'])),rates={k:float(control[k].mean()) for k in groups})
+    parent['delta']=dict(active=parent['active']-parent['baseline']['active'],rates={k:parent['rates'][k]-parent['baseline']['rates'][k] for k in groups})
+   parents.append(parent)
+  stimulus=dict(region={'buy':'vpoEN','sell':'vpoIN','surge':'vpoEN + vpoIN'}.get(kind,'L1 / L2'),cells=len(inputs[kind]) if kind in inputs else len(eye.on_idx)+len(eye.off_idx),rateHz=100 if kind in inputs else None,encoding='Engineered input; same image and seed control' if command.get('matched') else 'Browser luminance')
+  print(json.dumps(dict(id=command['id'],neurons=fb.n,graphSha256=graph_hash,windowMs=40,gain=.3,kind=kind or 'vision',stimulus=stimulus,parents=parents,modelScope='independent seeded trials; no learned memory',modelSource='fruitflydev/flycoinrh/flysim.py')),flush=True)
  except Exception as exc:print(json.dumps(dict(error=type(exc).__name__)),flush=True)
